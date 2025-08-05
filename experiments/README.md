@@ -63,4 +63,53 @@ Results are saved to: `{output_root}/{experiment_name}/`
 - Model checkpoints
 - Training logs
 - Generated samples
-- Validation metrics
+
+### Testing output structure
+
+After testing, the following outputs are generated:
+
+```
+{output_root}/{experiment_name}/generated_samples/
+├── test_samples_00000.jpg  # Original format (concatenated samples)
+├── test_samples_00001.jpg
+├── ...
+├── pred/                   # Individual PNG predictions
+│   ├── pred_00000.png
+│   ├── pred_00001.png
+│   └── ...
+└── gt/                     # Individual PNG ground truth
+    ├── gt_00000.png
+    ├── gt_00001.png
+    └── ...
+```
+
+**Key testing features:**
+- **Global intensity scaling**: All images scaled using the same global min/max for consistency
+- **Individual PNG files**: Each slice saved as a separate PNG for easy analysis
+- **Preserved original format**: Original concatenated JPG samples still saved
+- **Progress reporting**: Real-time progress updates during testing
+- **Modality-specific**: Automatically uses correct modality ordering based on target
+
+### Dataset structure
+
+The system expects your BraTS dataset to be organized as:
+```
+{data_path}/
+├── train/
+│   ├── T1.npy
+│   ├── T2.npy
+│   ├── FLAIR.npy
+│   └── T1CE.npy
+├── val/
+│   ├── T1.npy
+│   ├── T2.npy
+│   ├── FLAIR.npy
+│   └── T1CE.npy
+└── test/
+    ├── T1.npy
+    ├── T2.npy
+    ├── FLAIR.npy
+    └── T1CE.npy
+```
+
+Each `.npy` file should contain all slices for that modality with shape `(N, H, W)` where N is the number of slices.

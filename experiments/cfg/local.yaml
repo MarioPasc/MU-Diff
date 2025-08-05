@@ -88,9 +88,47 @@ experiments:
       contrast2: "T2"
       
     test_args:
+      # Basic settings
+      seed: 1024
+      target_modality: "T1CE"
+      
+      # Model architecture (must match training)
+      num_channels: 1
+      image_size: 256
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Diffusion settings (must match training)
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Embedding settings (must match training)
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      
+      # Test specific
       batch_size: 1
       gpu_chose: 0
-      target_modality: "T1CE"
+      compute_fid: false
 
   - exp_name: "synthesize_FLAIR"
     target: "FLAIR"
@@ -177,9 +215,47 @@ experiments:
       contrast2: "T2"
       
     test_args:
+      # Basic settings
+      seed: 1024
+      target_modality: "FLAIR"
+      
+      # Model architecture (must match training)
+      num_channels: 1
+      image_size: 256
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Diffusion settings (must match training)
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Embedding settings (must match training)
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      
+      # Test specific
       batch_size: 1
       gpu_chose: 0
-      target_modality: "FLAIR"
+      compute_fid: false
 
   - exp_name: "synthesize_T2"
     target: "T2"
@@ -266,9 +342,47 @@ experiments:
       contrast2: "FLAIR"
       
     test_args:
+      # Basic settings
+      seed: 1024
+      target_modality: "T2"
+      
+      # Model architecture (must match training)
+      num_channels: 1
+      image_size: 256
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Diffusion settings (must match training)
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Embedding settings (must match training)
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      
+      # Test specific
       batch_size: 1
       gpu_chose: 0
-      target_modality: "T2"
+      compute_fid: false
 
   - exp_name: "synthesize_T1"
     target: "T1"
@@ -355,6 +469,44 @@ experiments:
       contrast2: "T1CE"
       
     test_args:
+      # Basic settings
+      seed: 1024
+      target_modality: "T1"
+      
+      # Model architecture (must match training)
+      num_channels: 1
+      image_size: 256
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Diffusion settings (must match training)
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Embedding settings (must match training)
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      
+      # Test specific
       batch_size: 1
       gpu_chose: 0
-      target_modality: "T1"
+      compute_fid: false

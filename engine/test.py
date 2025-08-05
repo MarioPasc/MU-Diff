@@ -4,10 +4,37 @@ import os
 import argparse
 import torch
 import numpy as np
-import torchvision
+import torchvision # type: ignore
+from PIL import Image
 from backbones.ncsnpp_generator_adagn_feat import NCSNpp
 from backbones.ncsnpp_generator_adagn_feat import NCSNpp_adaptive
-from dataset_brats import CreateDatasetSynthesis
+from dataset.dataset_brats import BratsDataset
+
+# Wrapper class to maintain compatibility with existing test loop
+class BratsDatasetWrapper:
+    """
+    Wrapper for BratsDataset to match the expected format of the existing test loop.
+    Converts (cond_stack, target_tensor) to (x1, x2, x3, x4) format.
+    """
+    def __init__(self, split="test", base_path="data/BRATS", target_modality="T1CE"):
+        self.dataset = BratsDataset(split=split, base_path=base_path, target_modality=target_modality)
+        self.target_modality = target_modality
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        cond_stack, target_tensor = self.dataset[idx]
+        # cond_stack has shape [3, H, W] for 3 condition images
+        # target_tensor has shape [1, H, W] for target image
+        
+        # Split condition stack into individual modalities
+        x1 = cond_stack[0:1]  # First condition modality [1, H, W]
+        x2 = cond_stack[1:2]  # Second condition modality [1, H, W]
+        x3 = cond_stack[2:3]  # Third condition modality [1, H, W]
+        x4 = target_tensor    # Target modality [1, H, W]
+        
+        return x1, x2, x3, x4
 
 # %% Diffusion coefficients
 def var_func_vp(t, beta_min, beta_max):
@@ -209,7 +236,7 @@ def sample_and_test(args):
 
     load_checkpoint(checkpoint_file, gen_diffusive_2, 'gen_diffusive_2', device=device)
 
-    dataset = CreateDatasetSynthesis('test', args.input_path)
+    dataset = BratsDatasetWrapper(split='test', base_path=args.input_path, target_modality=args.target_modality)
     data_loader = torch.utils.data.DataLoader(dataset,
                                               batch_size=1,
                                               shuffle=False,
@@ -224,6 +251,18 @@ def sample_and_test(args):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
+    # Prepare output directories for predicted and ground truth images
+    pred_dir = os.path.join(save_dir, "pred")
+    gt_dir = os.path.join(save_dir, "gt")
+    os.makedirs(pred_dir, exist_ok=True)
+    os.makedirs(gt_dir, exist_ok=True)
+
+    # Collect all predictions and ground truth for global scaling
+    all_pred_slices = []
+    all_gt_slices = []
+    all_cond_data = []  # For debugging/visualization if needed
+
+    print(f"Processing {len(data_loader)} test samples...")
 
     for iteration, (x1, x2, x3, y) in enumerate(data_loader):
         cond_data1 = x1.to(device, non_blocking=True)
@@ -233,32 +272,70 @@ def sample_and_test(args):
 
         x1_t = torch.randn_like(real_data)
 
-
+        # Generate fake sample using the two-generator approach
         fake_sample = sample_from_model(pos_coeff, gen_diffusive_1, cond_data1, gen_diffusive_2, cond_data2,
                                          cond_data3,
                                          args.num_timesteps, x1_t, T, args)
 
-        fake_sample = to_range_0_1(fake_sample);
-        fake_sample = fake_sample / fake_sample.mean()
-        real_data = to_range_0_1(real_data);
-        real_data = real_data / real_data.mean()
-        x1 = to_range_0_1(x1);
-        x1 = x1 / x1.mean()
-        x2 = to_range_0_1(x2);
-        x2 = x2 / x2.mean()
-        x3 = to_range_0_1(x3);
-        x3 = x3 / x3.mean()
+        # Original normalization for saving concatenated samples
+        fake_sample_norm = to_range_0_1(fake_sample)
+        fake_sample_norm = fake_sample_norm / fake_sample_norm.mean()
+        real_data_norm = to_range_0_1(real_data)
+        real_data_norm = real_data_norm / real_data_norm.mean()
+        x1_norm = to_range_0_1(x1)
+        x1_norm = x1_norm / x1_norm.mean()
+        x2_norm = to_range_0_1(x2)
+        x2_norm = x2_norm / x2_norm.mean()
+        x3_norm = to_range_0_1(x3)
+        x3_norm = x3_norm / x3_norm.mean()
 
-
-        #save all the conditional, GT and synthetic samples
-        # fake_sample = torch.cat((x1.cuda(), x2.cuda(), x3.cuda(), fake_sample.cuda(), real_data.cuda()),
-        #                         axis=-1)
-        # torchvision.utils.save_image(fake_sample, '{}/{}_samples_{}.jpg'.format(save_dir, phase, iteration),
-        #                              normalize=True)
-
-        # save synthetic samples only
-        torchvision.utils.save_image(fake_sample, '{}/{}_samples_{}.jpg'.format(save_dir, phase, iteration),
+        # Save original format (synthetic samples only) - preserving original functionality
+        torchvision.utils.save_image(fake_sample_norm, '{}/{}_samples_{}.jpg'.format(save_dir, phase, iteration),
                                      normalize=True)
+
+        # Convert to numpy for individual image saving
+        pred_slice = fake_sample.cpu().numpy().squeeze()
+        gt_slice = real_data.cpu().numpy().squeeze()
+        
+        # Store for global scaling
+        all_pred_slices.append(pred_slice)
+        all_gt_slices.append(gt_slice)
+        all_cond_data.append({
+            'x1': x1.cpu().numpy().squeeze(),
+            'x2': x2.cpu().numpy().squeeze(), 
+            'x3': x3.cpu().numpy().squeeze()
+        })
+
+        if iteration % 50 == 0:
+            print(f"Processed {iteration}/{len(data_loader)} samples")
+
+    # Determine global intensity range for scaling images (to avoid per-slice normalization)
+    print("Computing global intensity range...")
+    all_pred_array = np.concatenate([p.flatten() for p in all_pred_slices])
+    all_gt_array = np.concatenate([g.flatten() for g in all_gt_slices])
+    global_min = float(min(all_pred_array.min(), all_gt_array.min()))
+    global_max = float(max(all_pred_array.max(), all_gt_array.max()))
+    
+    if global_max <= global_min:
+        global_min, global_max = 0.0, 1.0  # default range if images are constant
+    
+    print(f"Global intensity range: [{global_min:.4f}, {global_max:.4f}]")
+
+    # Save slices as PNG images with global scaling
+    print("Saving individual PNG images...")
+    for i, (pred_slice, gt_slice) in enumerate(zip(all_pred_slices, all_gt_slices)):
+        # Scale to [0,255] using global min/max for consistency
+        pred_img = np.clip((pred_slice - global_min) / (global_max - global_min) * 255.0, 0, 255).astype(np.uint8)
+        gt_img = np.clip((gt_slice - global_min) / (global_max - global_min) * 255.0, 0, 255).astype(np.uint8)
+        
+        Image.fromarray(pred_img).save(os.path.join(pred_dir, f"pred_{i:05d}.png"))
+        Image.fromarray(gt_img).save(os.path.join(gt_dir, f"gt_{i:05d}.png"))
+
+    print(f"Successfully completed testing!")
+    print(f"Saved {len(all_pred_slices)} predicted slices to '{pred_dir}'")
+    print(f"Saved {len(all_gt_slices)} ground truth slices to '{gt_dir}'")
+    print(f"Original format samples saved to '{save_dir}'")
+    print(f"Target modality: {args.target_modality}")
 
 
 
@@ -319,8 +396,8 @@ if __name__ == '__main__':
 
     # geenrator and training
     parser.add_argument('--exp', default='ixi_synth', help='name of experiment')
-    parser.add_argument('--input_path', help='path to input data')
-    parser.add_argument('--output_path', help='path to output saves')
+    parser.add_argument('--input_path', default='data/BRATS', help='path to input data (base path to dataset)')
+    parser.add_argument('--output_path', default='./results', help='path to output saves')
 
     parser.add_argument('--dataset', default='cifar10', help='name of dataset')
     parser.add_argument('--image_size', type=int, default=32,
@@ -343,6 +420,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--source', type=str, default='T2',
                         help='source contrast')
+    parser.add_argument('--target_modality', type=str, default='T1CE',
+                        help='Which modality to synthesize (T1, T2, FLAIR, or T1CE)')
     args = parser.parse_args()
 
     sample_and_test(args)
