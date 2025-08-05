@@ -10,13 +10,45 @@ from backbones.dense_layer import conv2d
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision
-from dataset_brats import CreateDatasetSynthesis
+import torchvision  # type: ignore
+from dataset.dataset_brats import BratsDataset
 
 from torch.multiprocessing import Process
 import torch.distributed as dist
 import shutil
 from skimage.metrics import peak_signal_noise_ratio as psnr
+
+
+class BratsDatasetWrapper:
+    """
+    Wrapper for BratsDataset to match the expected format of the existing training loop.
+    Converts (cond_stack, target_tensor) to (x1, x2, x3, x4) format.
+    
+    The BratsDataset orders modalities based on target_modality:
+    - For T1CE target: conditions are [FLAIR, T2, T1], target is T1CE
+    - For FLAIR target: conditions are [T1CE, T1, T2], target is FLAIR  
+    - For T2 target: conditions are [T1CE, T1, FLAIR], target is T2
+    - For T1 target: conditions are [FLAIR, T1CE, T2], target is T1
+    """
+    def __init__(self, split="train", base_path="data/BRATS", target_modality="T1CE"):
+        self.dataset = BratsDataset(split=split, base_path=base_path, target_modality=target_modality)
+        self.target_modality = target_modality
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        cond_stack, target_tensor = self.dataset[idx]
+        # cond_stack has shape [3, H, W] for 3 condition images
+        # target_tensor has shape [1, H, W] for target image
+        
+        # Split condition stack into individual modalities
+        x1 = cond_stack[0:1]  # First condition modality [1, H, W]
+        x2 = cond_stack[1:2]  # Second condition modality [1, H, W]
+        x3 = cond_stack[2:3]  # Third condition modality [1, H, W]
+        x4 = target_tensor    # Target modality [1, H, W]
+        
+        return x1, x2, x3, x4
 
 
 def copy_source(file, output_dir):
@@ -246,8 +278,8 @@ def train_mudiff(rank, gpu, args):
 
     nz = args.nz  # latent dimension
 
-    dataset = CreateDatasetSynthesis(phase="train", input_path=args.input_path)
-    dataset_val = CreateDatasetSynthesis(phase="val", input_path=args.input_path)
+    dataset = BratsDatasetWrapper(split="train", base_path=args.input_path, target_modality=args.target_modality)
+    dataset_val = BratsDatasetWrapper(split="val", base_path=args.input_path, target_modality=args.target_modality)
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset,
                                                                     num_replicas=args.world_size,
@@ -274,6 +306,7 @@ def train_mudiff(rank, gpu, args):
     val_psnr_values = np.zeros([2, args.num_epoch, len(data_loader_val)])
     print('train data size:' + str(len(data_loader)))
     print('val data size:' + str(len(data_loader_val)))
+    print('target modality:' + str(args.target_modality))
     to_range_0_1 = lambda x: (x + 1.) / 2.
     critic_criterian = nn.BCEWithLogitsLoss(reduction='none')
 
@@ -326,7 +359,13 @@ def train_mudiff(rank, gpu, args):
         if not os.path.exists(exp_path):
             os.makedirs(exp_path)
             copy_source(__file__, exp_path)
-            shutil.copytree('./backbones', os.path.join(exp_path, 'backbones'))
+            # Use absolute path for backbones directory
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            backbones_dir = os.path.join(os.path.dirname(script_dir), 'backbones')
+            if os.path.exists(backbones_dir):
+                shutil.copytree(backbones_dir, os.path.join(exp_path, 'backbones'))
+            else:
+                print(f"Warning: backbones directory not found at {backbones_dir}")
 
     coeff = Diffusion_Coefficients(args, device)
     pos_coeff = Posterior_Coefficients(args, device)
@@ -702,6 +741,8 @@ if __name__ == '__main__':
                         help='weightening of l1 loss part of diffusion ans cycle models')
     parser.add_argument('--lambda_mask_loss', type=float, default=0.1,
                         help='weightening of l1 loss part of diffusion ans cycle models')
+    parser.add_argument('--lambda_adv', type=float, default=1.0,
+                        help='weighting of adversarial loss for generators')
 
     ###ddp
     parser.add_argument('--num_proc_node', type=int, default=1,
@@ -718,6 +759,8 @@ if __name__ == '__main__':
                         help='contrast selection for model')
     parser.add_argument('--contrast2', type=str, default='T2',
                         help='contrast selection for model')
+    parser.add_argument('--target_modality', type=str, default='T1CE',
+                        help='Which modality to synthesize (T1, T2, FLAIR, or T1CE)')
     parser.add_argument('--port_num', type=str, default='6021',
                         help='port selection for code')
 

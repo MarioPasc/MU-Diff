@@ -1,0 +1,360 @@
+dataset: BraTS_MEN  
+data_path: /path/to/data/BraTS_MEN  
+output_root: /path/to/results  
+
+experiments:
+  - exp_name: "synthesize_T1CE"
+    target: "T1CE"
+    train_args:
+      # Basic settings
+      seed: 1024
+      resume: false
+      
+      # Data and image settings
+      image_size: 256
+      num_channels: 1
+      centered: true
+      target_modality: "T1CE"
+      
+      # Diffusion settings
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Model architecture
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"  # choices: ['none', 'output_skip', 'residual']
+      progressive_input: "residual"  # choices: ['none', 'input_skip', 'residual']
+      progressive_combine: "sum"  # choices: ['sum', 'cat']
+      
+      # Embedding settings
+      embedding_type: "positional"  # choices: ['positional', 'fourier']
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      ngf: 64
+      
+      # Training settings
+      batch_size: 3
+      num_epoch: 30
+      lr_g: 1.6e-4
+      lr_d: 1.0e-4
+      beta1: 0.5
+      beta2: 0.9
+      no_lr_decay: false
+      
+      # EMA settings
+      use_ema: false
+      ema_decay: 0.9999
+      
+      # Regularization
+      r1_gamma: 0.05
+      lazy_reg: null  # set to integer if needed
+      
+      # Loss weights
+      lambda_l1_loss: 0.5
+      lambda_mask_loss: 0.1
+      lambda_adv: 1.0
+      
+      # Saving settings
+      save_content: true
+      save_content_every: 1
+      save_ckpt_every: 10
+      
+      # Distributed training
+      num_proc_node: 1
+      num_process_per_node: 1
+      node_rank: 0
+      local_rank: 0
+      master_address: "127.0.0.1"
+      port_num: "6021"
+      
+      # Legacy contrast settings (kept for compatibility)
+      contrast1: "T1"
+      contrast2: "T2"
+      
+    test_args:
+      batch_size: 1
+      gpu_chose: 0
+      target_modality: "T1CE"
+
+  - exp_name: "synthesize_FLAIR"
+    target: "FLAIR"
+    train_args:
+      # Basic settings
+      seed: 1024
+      resume: false
+      
+      # Data and image settings
+      image_size: 256
+      num_channels: 1
+      centered: true
+      target_modality: "FLAIR"
+      
+      # Diffusion settings
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Model architecture
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Embedding settings
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      ngf: 64
+      
+      # Training settings
+      batch_size: 3
+      num_epoch: 30
+      lr_g: 1.6e-4
+      lr_d: 1.0e-4
+      beta1: 0.5
+      beta2: 0.9
+      no_lr_decay: false
+      
+      # EMA settings
+      use_ema: false
+      ema_decay: 0.9999
+      
+      # Regularization
+      r1_gamma: 0.05
+      lazy_reg: null
+      
+      # Loss weights
+      lambda_l1_loss: 0.5
+      lambda_mask_loss: 0.1
+      lambda_adv: 1.0
+      
+      # Saving settings
+      save_content: true
+      save_content_every: 1
+      save_ckpt_every: 10
+      
+      # Distributed training
+      num_proc_node: 1
+      num_process_per_node: 1
+      node_rank: 0
+      local_rank: 0
+      master_address: "127.0.0.1"
+      port_num: "6022"  # Different port for different experiment
+      
+      # Legacy contrast settings
+      contrast1: "T1"
+      contrast2: "T2"
+      
+    test_args:
+      batch_size: 1
+      gpu_chose: 0
+      target_modality: "FLAIR"
+
+  - exp_name: "synthesize_T2"
+    target: "T2"
+    train_args:
+      # Basic settings
+      seed: 1024
+      resume: false
+      
+      # Data and image settings
+      image_size: 256
+      num_channels: 1
+      centered: true
+      target_modality: "T2"
+      
+      # Diffusion settings
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Model architecture
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Embedding settings
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      ngf: 64
+      
+      # Training settings
+      batch_size: 3
+      num_epoch: 30
+      lr_g: 1.6e-4
+      lr_d: 1.0e-4
+      beta1: 0.5
+      beta2: 0.9
+      no_lr_decay: false
+      
+      # EMA settings
+      use_ema: false
+      ema_decay: 0.9999
+      
+      # Regularization
+      r1_gamma: 0.05
+      lazy_reg: null
+      
+      # Loss weights
+      lambda_l1_loss: 0.5
+      lambda_mask_loss: 0.1
+      lambda_adv: 1.0
+      
+      # Saving settings
+      save_content: true
+      save_content_every: 1
+      save_ckpt_every: 10
+      
+      # Distributed training
+      num_proc_node: 1
+      num_process_per_node: 1
+      node_rank: 0
+      local_rank: 0
+      master_address: "127.0.0.1"
+      port_num: "6023"
+      
+      # Legacy contrast settings
+      contrast1: "T1"
+      contrast2: "FLAIR"
+      
+    test_args:
+      batch_size: 1
+      gpu_chose: 0
+      target_modality: "T2"
+
+  - exp_name: "synthesize_T1"
+    target: "T1"
+    train_args:
+      # Basic settings
+      seed: 1024
+      resume: false
+      
+      # Data and image settings
+      image_size: 256
+      num_channels: 1
+      centered: true
+      target_modality: "T1"
+      
+      # Diffusion settings
+      use_geometric: false
+      beta_min: 0.1
+      beta_max: 20.0
+      num_timesteps: 4
+      
+      # Model architecture
+      num_channels_dae: 128
+      n_mlp: 3
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: [16]
+      dropout: 0.0
+      resamp_with_conv: true
+      conditional: true
+      fir: true
+      fir_kernel: [1, 3, 3, 1]
+      skip_rescale: true
+      resblock_type: "biggan"
+      progressive: "none"
+      progressive_input: "residual"
+      progressive_combine: "sum"
+      
+      # Embedding settings
+      embedding_type: "positional"
+      fourier_scale: 16.0
+      not_use_tanh: false
+      z_emb_dim: 256
+      t_emb_dim: 256
+      nz: 100
+      ngf: 64
+      
+      # Training settings
+      batch_size: 3
+      num_epoch: 30
+      lr_g: 1.6e-4
+      lr_d: 1.0e-4
+      beta1: 0.5
+      beta2: 0.9
+      no_lr_decay: false
+      
+      # EMA settings
+      use_ema: false
+      ema_decay: 0.9999
+      
+      # Regularization
+      r1_gamma: 0.05
+      lazy_reg: null
+      
+      # Loss weights
+      lambda_l1_loss: 0.5
+      lambda_mask_loss: 0.1
+      lambda_adv: 1.0
+      
+      # Saving settings
+      save_content: true
+      save_content_every: 1
+      save_ckpt_every: 10
+      
+      # Distributed training
+      num_proc_node: 1
+      num_process_per_node: 1
+      node_rank: 0
+      local_rank: 0
+      master_address: "127.0.0.1"
+      port_num: "6024"
+      
+      # Legacy contrast settings
+      contrast1: "FLAIR"
+      contrast2: "T1CE"
+      
+    test_args:
+      batch_size: 1
+      gpu_chose: 0
+      target_modality: "T1"

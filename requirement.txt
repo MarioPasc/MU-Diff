@@ -6,3 +6,4 @@ Pillow
 scikit-image
 pyyaml
 lpips
+types-PyYAML
