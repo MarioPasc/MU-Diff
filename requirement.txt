@@ -1,6 +1,8 @@
-torch==1.8.0
-torchvision==0.9.0
-pillow
-matplotlib
-scipy
-ninja
+numpy
+torch
+torchvision
+nibabel
+Pillow
+scikit-image
+pyyaml
+lpips
