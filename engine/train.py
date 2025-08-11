@@ -243,7 +243,7 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
             t_time = t
             latent_z = torch.randn(x.size(0), opt.nz, device=x.device)  # .to(x.device)
             # Use autocast for inference sampling
-            with autocast('cuda'):
+            with autocast():
                 x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
                 x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
 
@@ -335,8 +335,8 @@ def train_mudiff(rank, gpu, args):
     optimizer_gen_diffusive_2 = optim.Adam(gen_diffusive_2.parameters(), lr=args.lr_g, betas=(args.beta1, args.beta2))
 
     # AMP scalers
-    scaler_d = GradScaler('cuda')
-    scaler_g = GradScaler('cuda')
+    scaler_d = GradScaler()
+    scaler_g = GradScaler()
 
     if args.use_ema:
         optimizer_gen_diffusive_1 = EMA(optimizer_gen_diffusive_1, ema_decay=args.ema_decay)
@@ -438,7 +438,7 @@ def train_mudiff(rank, gpu, args):
             x2_t.requires_grad = True
 
             # train discriminator with real
-            with autocast('cuda'):
+            with autocast():
                 D2_real, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                 errD2_real2 = F.softplus(-D2_real).mean()
 
@@ -471,7 +471,7 @@ def train_mudiff(rank, gpu, args):
             # train with fake
             latent_z2 = torch.randn(batch_size, nz, device=device)
 
-            with autocast('cuda'):
+            with autocast():
                 x_tp1_det = x2_tp1.detach()
                 if args.use_grad_checkpoint:
                     # Ensure at least one input requires grad for checkpoint to work
@@ -529,7 +529,7 @@ def train_mudiff(rank, gpu, args):
 
             latent_z2 = torch.randn(batch_size, nz, device=device)
 
-            with autocast('cuda'):
+            with autocast():
                 x_tp1_det = x2_tp1.detach()
                 if args.use_grad_checkpoint:
                     x_in = x_tp1_det.requires_grad_()
