@@ -16,6 +16,37 @@ STORE_FALSE_FLAGS = {
     "centered", "resamp_with_conv", "conditional", "fir", "skip_rescale",
 }
 
+# Keys that argparse expects as a single argument (string), even if YAML provides a list
+LIST_AS_COMMA_FLAGS = {"attn_resolutions", "fir_kernel"}
+
+def append_args(cmd, args_dict):
+    for key, val in args_dict.items():
+        if val is None:
+            continue
+
+        # Booleans: include flag only if it changes the default
+        if isinstance(val, bool):
+            if (key in STORE_TRUE_FLAGS and val) or (key in STORE_FALSE_FLAGS and not val):
+                cmd.append(f"--{key}")
+            continue
+
+        # Lists or tuples
+        if isinstance(val, (list, tuple)):
+            if key in LIST_AS_COMMA_FLAGS:
+                # Join into a single comma-separated token: e.g. "1,3,3,1"
+                cmd.append(f"--{key}")
+                cmd.append(",".join(str(x) for x in val))
+            else:
+                # True var-args list (e.g., ch_mult)
+                cmd.append(f"--{key}")
+                cmd += [str(x) for x in val]
+            continue
+
+        # Everything else (numbers/strings)
+        cmd.append(f"--{key}")
+        cmd.append(str(val))
+    return cmd
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run a specific experiment as defined in a YAML config.",
@@ -88,25 +119,7 @@ Examples:
     # Run training if not test-only
     if not args.test_only:
         train_cmd = [sys.executable, "../engine/train.py"]
-        for key, val in train_args.items():
-            # Skip None (e.g., lazy_reg: null)
-            if val is None:
-                continue
-
-            if isinstance(val, bool):
-                # Add flag only when it changes the default
-                if (key in STORE_TRUE_FLAGS and val) or (key in STORE_FALSE_FLAGS and not val):
-                    train_cmd.append(f"--{key}")
-                # Otherwise skip
-                continue
-
-            if isinstance(val, (list, tuple)):
-                train_cmd.append(f"--{key}")
-                train_cmd += [str(x) for x in val]
-            else:
-                train_cmd.append(f"--{key}")
-                train_cmd.append(str(val))
-
+        train_cmd = append_args(train_cmd, train_args)
         print("Train command:", " ".join(train_cmd))
         result = subprocess.run(train_cmd, cwd=os.path.dirname(__file__))
         if result.returncode != 0:
@@ -118,22 +131,7 @@ Examples:
         test_script_path = os.path.join(os.path.dirname(__file__), "../engine/test.py")
         if os.path.exists(test_script_path):
             test_cmd = [sys.executable, "../engine/test.py"]
-            for key, val in test_args.items():
-                if val is None:
-                    continue
-
-                if isinstance(val, bool):
-                    if (key in STORE_TRUE_FLAGS and val) or (key in STORE_FALSE_FLAGS and not val):
-                        test_cmd.append(f"--{key}")
-                    continue
-
-                if isinstance(val, (list, tuple)):
-                    test_cmd.append(f"--{key}")
-                    test_cmd += [str(x) for x in val]
-                else:
-                    test_cmd.append(f"--{key}")
-                    test_cmd.append(str(val))
-
+            test_cmd = append_args(test_cmd, test_args)
             print("Test command:", " ".join(test_cmd))
             result = subprocess.run(test_cmd, cwd=os.path.dirname(__file__))
             if result.returncode != 0:
