@@ -10,6 +10,8 @@ from backbones.ncsnpp_generator_adagn_feat import NCSNpp
 from backbones.ncsnpp_generator_adagn_feat import NCSNpp_adaptive
 from dataset.dataset_brats import BratsDataset
 from engine.train import _as_int_list
+from torch.cuda.amp import autocast
+# from torch.utils.checkpoint import checkpoint  # not typically used in eval
 
 # Wrapper class to maintain compatibility with existing test loop
 class BratsDatasetWrapper:
@@ -180,10 +182,12 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
             t_time = t
             latent_z = torch.randn(x.size(0), opt.nz, device=x.device)  # .to(x.device)
 
-            x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
-            x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
+            # autocast for inference
+            with autocast():
+                x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
+                x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
 
-            x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
+                x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
 
             x = x_new.detach()
 

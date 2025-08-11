@@ -17,6 +17,8 @@ from torch.multiprocessing import Process
 import torch.distributed as dist
 import shutil
 from skimage.metrics import peak_signal_noise_ratio as psnr
+from torch.cuda.amp import autocast, GradScaler
+from torch.utils.checkpoint import checkpoint
 
 
 class BratsDatasetWrapper:
@@ -242,10 +244,12 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
 
             t_time = t
             latent_z = torch.randn(x.size(0), opt.nz, device=x.device)  # .to(x.device)
-            x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
-            x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
+            # Use autocast for inference sampling
+            with autocast():
+                x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
+                x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
 
-            x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
+                x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
             x = x_new.detach()
 
     return x
@@ -332,6 +336,10 @@ def train_mudiff(rank, gpu, args):
 
     optimizer_gen_diffusive_2 = optim.Adam(gen_diffusive_2.parameters(), lr=args.lr_g, betas=(args.beta1, args.beta2))
 
+    # AMP scalers
+    scaler_d = GradScaler()
+    scaler_g = GradScaler()
+
     if args.use_ema:
         optimizer_gen_diffusive_1 = EMA(optimizer_gen_diffusive_1, ema_decay=args.ema_decay)
         optimizer_gen_diffusive_2 = EMA(optimizer_gen_diffusive_2, ema_decay=args.ema_decay)
@@ -404,6 +412,13 @@ def train_mudiff(rank, gpu, args):
     else:
         global_step, epoch, init_epoch = 0, 0, 0
 
+    # Helpers for optional checkpointing of generator forwards
+    def run_g1(x, c1, c2, c3, t, z):
+        return gen_diffusive_1(x, c1, c2, c3, t, z)
+
+    def run_g2(x, c1, c2, c3, t, z, prev):
+        return gen_diffusive_2(x, c1, c2, c3, t, z, prev)
+
     for epoch in range(init_epoch, args.num_epoch + 1):
         # train_sampler.set_epoch(epoch)
 
@@ -411,7 +426,7 @@ def train_mudiff(rank, gpu, args):
             for p in disc_diffusive_2.parameters():
                 p.requires_grad = True
 
-            disc_diffusive_2.zero_grad()
+            optimizer_disc_diffusive_2.zero_grad(set_to_none=True)
 
             # sample from p(x_0)
             cond_data1 = x1.to(device, non_blocking=True)
@@ -425,12 +440,12 @@ def train_mudiff(rank, gpu, args):
             x2_t.requires_grad = True
 
             # train discriminator with real
-            D2_real, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
+            with autocast():
+                D2_real, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
+                errD2_real2 = F.softplus(-D2_real).mean()
 
-            errD2_real2 = F.softplus(-D2_real)
-            errD2_real2 = errD2_real2.mean()
             errD_real2 = errD2_real2
-            errD_real2.backward(retain_graph=True)
+            scaler_d.scale(errD_real2).backward(retain_graph=True)
 
             if args.lazy_reg is None:
 
@@ -442,7 +457,7 @@ def train_mudiff(rank, gpu, args):
                 ).mean()
 
                 grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                grad_penalty2.backward()
+                scaler_d.scale(grad_penalty2).backward()
             else:
                 if global_step % args.lazy_reg == 0:
                     grad2_real = torch.autograd.grad(
@@ -453,35 +468,50 @@ def train_mudiff(rank, gpu, args):
                     ).mean()
 
                     grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                    grad_penalty2.backward()
+                    scaler_d.scale(grad_penalty2).backward()
 
             # train with fake
-
             latent_z2 = torch.randn(batch_size, nz, device=device)
 
-            x2_0_predict_diff_g1 = gen_diffusive_1(x2_tp1.detach(), cond_data1, cond_data2, cond_data3, t2, latent_z2)
+            with autocast():
+                x_tp1_det = x2_tp1.detach()
+                if args.use_grad_checkpoint:
+                    # Ensure at least one input requires grad for checkpoint to work
+                    x_in = x_tp1_det.requires_grad_()
+                    x2_0_predict_diff_g1 = checkpoint(run_g1, x_in, cond_data1, cond_data2, cond_data3, t2, latent_z2)
+                else:
+                    x2_0_predict_diff_g1 = run_g1(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2)
 
-            x2_0_predict_diff_g2 = gen_diffusive_2(x2_tp1.detach(), cond_data1, cond_data2, cond_data3, t2, latent_z2,
-                                                   x2_0_predict_diff_g1[:, [0], :])
+                if args.use_grad_checkpoint:
+                    x2_0_predict_diff_g2 = checkpoint(
+                        run_g2,
+                        x_tp1_det,
+                        cond_data1,
+                        cond_data2,
+                        cond_data3,
+                        t2,
+                        latent_z2,
+                        x2_0_predict_diff_g1[:, [0], :]
+                    )
+                else:
+                    x2_0_predict_diff_g2 = run_g2(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2,
+                                                  x2_0_predict_diff_g1[:, [0], :])
 
-            x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
+                x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
+                x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
 
-            x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
+                # D output for fake sample x_pos_sample
+                output2_g1, _ = disc_diffusive_2(x2_pos_sample_g1, t2, x2_tp1.detach())
+                output2_g2, _ = disc_diffusive_2(x2_pos_sample_g2, t2, x2_tp1.detach())
 
-            # D output for fake sample x_pos_sample
+                errD2_fake2_g1 = (F.softplus(output2_g1)).mean()
+                errD2_fake2_g2 = (F.softplus(output2_g2)).mean()
+                errD_fake2 = errD2_fake2_g1 + errD2_fake2_g2
 
-            output2_g1, _ = disc_diffusive_2(x2_pos_sample_g1, t2, x2_tp1.detach())
+            scaler_d.scale(errD_fake2).backward()
 
-            output2_g2, _ = disc_diffusive_2(x2_pos_sample_g2, t2, x2_tp1.detach())
-
-            errD2_fake2_g1 = (F.softplus(output2_g1)).mean()
-
-            errD2_fake2_g2 = (F.softplus(output2_g2)).mean()
-
-            errD_fake2 = errD2_fake2_g1 + errD2_fake2_g2
-            errD_fake2.backward()
-
-            optimizer_disc_diffusive_2.step()
+            scaler_d.step(optimizer_disc_diffusive_2)
+            scaler_d.update()
 
             for p in disc_diffusive_2.parameters():
                 p.requires_grad = False
@@ -491,8 +521,8 @@ def train_mudiff(rank, gpu, args):
             cond_data3 = x3.to(device, non_blocking=True)
             real_data = x4.to(device, non_blocking=True)
 
-            gen_diffusive_1.zero_grad()
-            gen_diffusive_2.zero_grad()
+            optimizer_gen_diffusive_1.zero_grad(set_to_none=True)
+            optimizer_gen_diffusive_2.zero_grad(set_to_none=True)
 
             t2 = torch.randint(0, args.num_timesteps, (real_data.size(0),), device=device)
 
@@ -501,51 +531,62 @@ def train_mudiff(rank, gpu, args):
 
             latent_z2 = torch.randn(batch_size, nz, device=device)
 
-            x2_0_predict_diff_g1 = gen_diffusive_1(x2_tp1.detach(), cond_data1, cond_data2, cond_data3, t2, latent_z2)
+            with autocast():
+                x_tp1_det = x2_tp1.detach()
+                if args.use_grad_checkpoint:
+                    x_in = x_tp1_det.requires_grad_()
+                    x2_0_predict_diff_g1 = checkpoint(run_g1, x_in, cond_data1, cond_data2, cond_data3, t2, latent_z2)
+                else:
+                    x2_0_predict_diff_g1 = run_g1(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2)
 
-            x2_0_predict_diff_g2 = gen_diffusive_2(x2_tp1.detach(), cond_data1, cond_data2, cond_data3, t2, latent_z2,
-                                                   x2_0_predict_diff_g1[:, [0], :])
+                if args.use_grad_checkpoint:
+                    x2_0_predict_diff_g2 = checkpoint(
+                        run_g2,
+                        x_tp1_det,
+                        cond_data1,
+                        cond_data2,
+                        cond_data3,
+                        t2,
+                        latent_z2,
+                        x2_0_predict_diff_g1[:, [0], :]
+                    )
+                else:
+                    x2_0_predict_diff_g2 = run_g2(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2,
+                                                  x2_0_predict_diff_g1[:, [0], :])
 
-            # sampling q(x_t | x_0_predict, x_t+1)
-            x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
+                # sampling q(x_t | x_0_predict, x_t+1)
+                x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
+                x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
 
-            x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
+                # D output for fake sample x_pos_sample
+                output2_g1, att_feat_g1 = disc_diffusive_2(x2_pos_sample_g1, t2, x2_tp1.detach())
+                output2_g2, att_feat_g2 = disc_diffusive_2(x2_pos_sample_g2, t2, x2_tp1.detach())
 
-            # D output for fake sample x_pos_sample
-            output2_g1, att_feat_g1 = disc_diffusive_2(x2_pos_sample_g1, t2, x2_tp1.detach())
+                att_map_g1 = torch.sigmoid(att_conv(att_feat_g1))
+                att_map_g1 = F.interpolate(att_map_g1, size=(256, 256), mode='bilinear', align_corners=False)
 
-            output2_g2, att_feat_g2 = disc_diffusive_2(x2_pos_sample_g2, t2, x2_tp1.detach())
+                att_map_g2 = torch.sigmoid(att_conv(att_feat_g2))
+                att_map_g2 = F.interpolate(att_map_g2, size=(256, 256), mode='bilinear', align_corners=False)
 
-            att_map_g1 = torch.sigmoid(att_conv(att_feat_g1))
-            att_map_g1 = F.interpolate(att_map_g1, size=(256, 256), mode='bilinear', align_corners=False)
+                mask_loss_1 = (att_map_g2 * critic_criterian(x2_pos_sample_g1, torch.sigmoid(x2_pos_sample_g2))).mean()
+                mask_loss_2 = (att_map_g1 * critic_criterian(x2_pos_sample_g2, torch.sigmoid(x2_pos_sample_g1))).mean()
 
-            att_map_g2 = torch.sigmoid(att_conv(att_feat_g2))
-            att_map_g2 = F.interpolate(att_map_g2, size=(256, 256), mode='bilinear', align_corners=False)
+                mask_loss = mask_loss_1 + mask_loss_2
 
-            mask_loss_1 = (att_map_g2 * critic_criterian(x2_pos_sample_g1, torch.sigmoid(x2_pos_sample_g2))).mean()
-            mask_loss_2 = (att_map_g1 * critic_criterian(x2_pos_sample_g2, torch.sigmoid(x2_pos_sample_g1))).mean()
+                errG2 = F.softplus(-output2_g1).mean()
+                errG4 = F.softplus(-output2_g2).mean()
+                errG_adv = errG2 + errG4
 
-            mask_loss = mask_loss_1 + mask_loss_2
+                errG1_2_L1 = F.l1_loss(x2_0_predict_diff_g1[:, [0], :], real_data)
+                errG2_2_L1 = F.l1_loss(x2_0_predict_diff_g2[:, [0], :], real_data)
+                errG_L1 = errG1_2_L1 + errG2_2_L1
 
-            errG2 = F.softplus(-output2_g1)
-            errG2 = errG2.mean()
+                errG = errG_adv + (args.lambda_l1_loss * errG_L1) + (args.lambda_mask_loss * mask_loss)
 
-            errG4 = F.softplus(-output2_g2)
-            errG4 = errG4.mean()
-
-            errG_adv = errG2 + errG4
-
-            errG1_2_L1 = F.l1_loss(x2_0_predict_diff_g1[:, [0], :], real_data)
-
-            errG2_2_L1 = F.l1_loss(x2_0_predict_diff_g2[:, [0], :], real_data)
-
-            errG_L1 = errG1_2_L1 + errG2_2_L1
-
-            errG = errG_adv + (args.lambda_l1_loss * errG_L1) + (args.lambda_mask_loss * mask_loss)
-
-            errG.backward()
-            optimizer_gen_diffusive_1.step()
-            optimizer_gen_diffusive_2.step()
+            scaler_g.scale(errG).backward()
+            scaler_g.step(optimizer_gen_diffusive_1)
+            scaler_g.step(optimizer_gen_diffusive_2)
+            scaler_g.update()
 
             global_step += 1
             if iteration % 100 == 0:
@@ -622,10 +663,8 @@ def train_mudiff(rank, gpu, args):
                                                 args.num_timesteps, x_t, T, args)
 
             # diffusion steps
-            fake_sample_val = to_range_0_1(fake_sample_val);
-            fake_sample_val = fake_sample_val / fake_sample_val.mean()
-            real_data_val = to_range_0_1(real_data_val);
-            real_data_val = real_data_val / real_data_val.mean()
+            fake_sample_val = to_range_0_1(fake_sample_val); fake_sample_val = fake_sample_val / fake_sample_val.mean()
+            real_data_val = to_range_0_1(real_data_val); real_data_val = real_data_val / real_data_val.mean()
 
             fake_sample_val = fake_sample_val.cpu().numpy()
             real_data_val = real_data_val.cpu().numpy()
@@ -777,6 +816,10 @@ if __name__ == '__main__':
                         help='Which modality to synthesize (T1, T2, FLAIR, or T1CE)')
     parser.add_argument('--port_num', type=str, default='6021',
                         help='port selection for code')
+
+    # New flag to enable gradient checkpointing for memory savings
+    parser.add_argument('--use_grad_checkpoint', action='store_true', default=False,
+                        help='Enable gradient checkpointing on generator forwards to save memory')
 
     args = parser.parse_args()
     args.world_size = args.num_proc_node * args.num_process_per_node
