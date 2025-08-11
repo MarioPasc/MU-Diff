@@ -4,6 +4,18 @@ import subprocess
 import argparse
 import yaml
 
+# Add these sets to encode boolean flag semantics
+STORE_TRUE_FLAGS = {
+    # train.py
+    "use_geometric", "use_ema", "not_use_tanh", "no_lr_decay", "save_content",
+    # test.py
+    "compute_fid",
+}
+STORE_FALSE_FLAGS = {
+    # train.py flags that flip True->False when present
+    "centered", "resamp_with_conv", "conditional", "fir", "skip_rescale",
+}
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run a specific experiment as defined in a YAML config.",
@@ -75,20 +87,26 @@ Examples:
 
     # Run training if not test-only
     if not args.test_only:
-        # Build training command - use relative path from experiments directory
         train_cmd = [sys.executable, "../engine/train.py"]
         for key, val in train_args.items():
-            train_cmd.append(f"--{key}")
-            if isinstance(val, (list, tuple)):         # e.g., list arguments like ch_mult
+            # Skip None (e.g., lazy_reg: null)
+            if val is None:
+                continue
+
+            if isinstance(val, bool):
+                # Add flag only when it changes the default
+                if (key in STORE_TRUE_FLAGS and val) or (key in STORE_FALSE_FLAGS and not val):
+                    train_cmd.append(f"--{key}")
+                # Otherwise skip
+                continue
+
+            if isinstance(val, (list, tuple)):
+                train_cmd.append(f"--{key}")
                 train_cmd += [str(x) for x in val]
-            elif isinstance(val, bool):                # boolean flags
-                if val:
-                    train_cmd[-1] = f"--{key}"  # keep flag (store_true)
-                else:
-                    train_cmd.pop()            # remove the flag if False
             else:
+                train_cmd.append(f"--{key}")
                 train_cmd.append(str(val))
-        
+
         print("Train command:", " ".join(train_cmd))
         result = subprocess.run(train_cmd, cwd=os.path.dirname(__file__))
         if result.returncode != 0:
@@ -97,23 +115,25 @@ Examples:
 
     # Run testing if not train-only
     if not args.train_only:
-        # Check if test.py exists
         test_script_path = os.path.join(os.path.dirname(__file__), "../engine/test.py")
         if os.path.exists(test_script_path):
-            # Build testing command
             test_cmd = [sys.executable, "../engine/test.py"]
             for key, val in test_args.items():
-                test_cmd.append(f"--{key}")
+                if val is None:
+                    continue
+
+                if isinstance(val, bool):
+                    if (key in STORE_TRUE_FLAGS and val) or (key in STORE_FALSE_FLAGS and not val):
+                        test_cmd.append(f"--{key}")
+                    continue
+
                 if isinstance(val, (list, tuple)):
+                    test_cmd.append(f"--{key}")
                     test_cmd += [str(x) for x in val]
-                elif isinstance(val, bool):
-                    if val:
-                        test_cmd[-1] = f"--{key}"
-                    else:
-                        test_cmd.pop()
                 else:
+                    test_cmd.append(f"--{key}")
                     test_cmd.append(str(val))
-            
+
             print("Test command:", " ".join(test_cmd))
             result = subprocess.run(test_cmd, cwd=os.path.dirname(__file__))
             if result.returncode != 0:
