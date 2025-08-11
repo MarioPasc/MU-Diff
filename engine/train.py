@@ -356,6 +356,7 @@ def train_mudiff(rank, gpu, args):
 
     exp_path = os.path.join(output_path, exp)
     if rank == 0:
+        # Restore provenance copy: save a snapshot of this script and the backbones/ dir
         if not os.path.exists(exp_path):
             os.makedirs(exp_path)
             copy_source(__file__, exp_path)
@@ -363,10 +364,15 @@ def train_mudiff(rank, gpu, args):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             backbones_dir = os.path.join(os.path.dirname(script_dir), 'backbones')
             if os.path.exists(backbones_dir):
-                shutil.copytree(backbones_dir, os.path.join(exp_path, 'backbones'))
+                dest_backbones = os.path.join(exp_path, 'backbones')
+                if not os.path.exists(dest_backbones):
+                    shutil.copytree(backbones_dir, dest_backbones)
             else:
                 print(f"Warning: backbones directory not found at {backbones_dir}")
-
+        else:
+            os.makedirs(exp_path, exist_ok=True)
+        
+        
     coeff = Diffusion_Coefficients(args, device)
     pos_coeff = Posterior_Coefficients(args, device)
     T = get_time_schedule(args, device)

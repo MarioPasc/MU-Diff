@@ -1,6 +1,6 @@
 dataset: BraTS_MEN  
-data_path: ./data/BraTS_MEN  
-output_root: ./results  
+data_path: /mnt/home/users/tic_163_uma/mpascual/fscratch/datasets/meningiomas/diffusion_brats  
+output_root: /mnt/home/users/tic_163_uma/mpascual/fscratch/results 
 
 experiments:
   - exp_name: "synthesize_T1CE"
