@@ -183,7 +183,7 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
             latent_z = torch.randn(x.size(0), opt.nz, device=x.device)  # .to(x.device)
 
             # autocast for inference
-            with autocast():
+            with autocast('cuda'):
                 x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
                 x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
 
