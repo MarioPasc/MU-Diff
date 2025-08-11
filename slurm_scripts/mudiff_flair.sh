@@ -10,6 +10,30 @@
 #SBATCH --error=log_mudiff_flair.%J.err
 #SBATCH --output=log_mudiff_flair.%J.out
 
+# ===============================
+# User-configurable paths
+# ===============================
+# Experiment name (must match exp_name in YAML)
+EXP_NAME="synthesize_FLAIR"
+# User gives run script path
+SCRIPT_DIR="/mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/experiments/run.py"
+# User gives root path. 
+ROOT="/mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF"
+# Key directories/files
+CONFIG_FILE="$ROOT/cfg.yaml"
+DATA_DIR="/mnt/home/users/tic_163_uma/mpascual/fscratch/datasets/meningiomas/diffusion_brats"
+# Local results root (for info only; actual output_root may be overridden by YAML)
+RESULTS_ROOT="/mnt/home/users/tic_163_uma/mpascual/fscratch/results"
+RESULTS_DIR="$RESULTS_ROOT/$EXP_NAME"
+
+if [ ! -d "$RESULTS_DIR" ]; then
+    echo "Creating results directory: $RESULTS_DIR"
+    mkdir -p "$RESULTS_DIR"
+else
+    echo "Results directory already exists: $RESULTS_DIR"
+fi
+
+
 # Print job information
 echo "====================================="
 echo "SLURM JOB: FLAIR Synthesis with MU-Diff"
@@ -27,12 +51,7 @@ echo
 
 # Set up environment
 echo "Setting up environment..."
-module purge
-module load cuda/11.8
-module load python/3.9
-
-# Activate virtual environment (adjust path as needed)
-# source /path/to/your/venv/bin/activate
+source load mudiff
 
 # Check Python and CUDA installation
 echo "Python version: $(python --version)"
@@ -61,54 +80,44 @@ fi
 echo "GPU count verified: $GPU_COUNT GPUs available"
 echo
 
-# Navigate to experiment directory
-cd experiments
+# Navigate to experiment directory (use absolute paths instead)
+# cd experiments
 
 # Verify configuration file exists
-if [ ! -f "cfg/local.yaml" ]; then
-    echo "ERROR: Configuration file cfg/local.yaml not found!"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: Configuration file '$CONFIG_FILE' not found!"
     exit 1
 fi
 
 # Verify dataset exists
 echo "Checking dataset availability..."
-if [ ! -d "../data" ]; then
-    echo "ERROR: Dataset directory '../data' not found!"
+if [ ! -d "$DATA_DIR" ]; then
+    echo "ERROR: Dataset directory '$DATA_DIR' not found!"
     echo "Please ensure the preprocessed dataset is uploaded to the supercomputer."
     exit 1
 fi
 
-# Run the complete FLAIR synthesis experiment (train + test)
-echo "Starting FLAIR synthesis experiment..."
-echo "Command: python run.py -c cfg/local.yaml -e synthesize_FLAIR"
-echo "This will:"
-echo "  1. Train the MU-Diff model for FLAIR synthesis"
-echo "  2. Log training metrics and validation scores"
-echo "  3. Perform testing and log test metrics"
-echo "  4. Save model checkpoints and generated samples"
-echo
-
 # Execute the experiment
-python run.py -c cfg/local.yaml -e synthesize_FLAIR
+python "$SCRIPT_DIR" -c "$CONFIG_FILE" -e "$EXP_NAME"
 
 # Check exit status
 EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
     echo
-    echo "====================================="
+    echo "=================================================="
     echo "FLAIR synthesis experiment completed successfully!"
-    echo "====================================="
-    echo "Results saved in: ../results/synthesize_FLAIR/"
-    echo "Check the following outputs:"
-    echo "  - Model checkpoints: ../results/synthesize_FLAIR/gen_diffusive_*.pth"
-    echo "  - Training samples: ../results/synthesize_FLAIR/sample_discrete_epoch_*.png"
-    echo "  - Validation metrics: ../results/synthesize_FLAIR/val_*.npy"
-    echo "  - Test results: ../results/synthesize_FLAIR/generated_samples/"
+    echo "=================================================="
+    echo "Results saved in (local default): $RESULTS_DIR/"
+    echo "Note: If output_root is set in YAML, results are under that root:"
+    echo "  - Model checkpoints: $RESULTS_DIR/gen_diffusive_*.pth"
+    echo "  - Training samples: $RESULTS_DIR/sample_discrete_epoch_*.png"
+    echo "  - Validation metrics: $RESULTS_DIR/val_*.npy"
+    echo "  - Test results: $RESULTS_DIR/generated_samples/"
 else
     echo
-    echo "====================================="
+    echo "========================================="
     echo "ERROR: FLAIR synthesis experiment failed!"
-    echo "====================================="
+    echo "========================================="
     echo "Exit code: $EXIT_CODE"
     echo "Check error logs: log_mudiff_flair.$SLURM_JOB_ID.err"
     exit $EXIT_CODE
