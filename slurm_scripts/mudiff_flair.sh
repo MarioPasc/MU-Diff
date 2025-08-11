@@ -15,8 +15,6 @@
 # ===============================
 # Experiment name (must match exp_name in YAML)
 EXP_NAME="synthesize_FLAIR"
-# User gives run script path
-SCRIPT_DIR="/mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/experiments/run.py"
 # User gives root path. 
 ROOT="/mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF"
 # Key directories/files
@@ -25,6 +23,10 @@ DATA_DIR="/mnt/home/users/tic_163_uma/mpascual/fscratch/datasets/meningiomas/dif
 # Local results root (for info only; actual output_root may be overridden by YAML)
 RESULTS_ROOT="/mnt/home/users/tic_163_uma/mpascual/fscratch/results"
 RESULTS_DIR="$RESULTS_ROOT/$EXP_NAME"
+
+# Derive repo root from the run.py path and set PYTHONPATH accordingly
+REPO_ROOT="/mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff"
+RUN_PY="$REPO_ROOT/experiments/run.py"
 
 if [ ! -d "$RESULTS_DIR" ]; then
     echo "Creating results directory: $RESULTS_DIR"
@@ -49,6 +51,8 @@ echo "Working Directory: $PWD"
 echo "====================================="
 echo
 
+echo "Repository Root: $REPO_ROOT"
+
 # Set up environment
 echo "Setting up environment..."
 source load mudiff
@@ -60,7 +64,9 @@ echo
 
 # Set CUDA environment variables for 2 GPUs
 export CUDA_VISIBLE_DEVICES=0,1
-export PYTHONPATH=$PWD:$PYTHONPATH
+# Ensure Python can import project packages (backbones, dataset, etc.)
+export PYTHONPATH="$REPO_ROOT:$PYTHONPATH"
+echo "PYTHONPATH: $PYTHONPATH"
 
 # Set multiprocessing method for PyTorch distributed training
 export TORCH_DISTRIBUTED_DEBUG=INFO
@@ -98,7 +104,7 @@ if [ ! -d "$DATA_DIR" ]; then
 fi
 
 # Execute the experiment
-python "$SCRIPT_DIR" -c "$CONFIG_FILE" -e "$EXP_NAME"
+python "$RUN_PY" -c "$CONFIG_FILE" -e "$EXP_NAME"
 
 # Check exit status
 EXIT_CODE=$?
