@@ -653,6 +653,14 @@ def init_processes(rank, size, fn, args):
 def cleanup():
     dist.destroy_process_group()
 
+def _as_int_list(v):
+    if isinstance(v, (list, tuple)):
+        return [int(x) for x in v]
+    if isinstance(v, str):
+        # accept "16" or "16,32" or "16 32"
+        parts = v.replace(',', ' ').split()
+        return [int(x) for x in parts]
+    return [int(v)]
 
 # %%
 if __name__ == '__main__':
@@ -774,6 +782,8 @@ if __name__ == '__main__':
     args.world_size = args.num_proc_node * args.num_process_per_node
     size = args.num_process_per_node
 
+    args.attn_resolutions = _as_int_list(args.attn_resolutions)
+    args.fir_kernel       = _as_int_list(args.fir_kernel)
     if size > 1:
         processes = []
         for rank in range(size):

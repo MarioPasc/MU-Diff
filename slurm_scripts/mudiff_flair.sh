@@ -71,6 +71,7 @@ echo "PYTHONPATH: $PYTHONPATH"
 # Set multiprocessing method for PyTorch distributed training
 export TORCH_DISTRIBUTED_DEBUG=INFO
 export NCCL_DEBUG=INFO
+export TORCH_CUDA_ARCH_LIST="8.0"
 
 # Check GPU availability
 echo "Available GPUs:"

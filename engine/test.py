@@ -9,6 +9,7 @@ from PIL import Image
 from backbones.ncsnpp_generator_adagn_feat import NCSNpp
 from backbones.ncsnpp_generator_adagn_feat import NCSNpp_adaptive
 from dataset.dataset_brats import BratsDataset
+from engine.train import _as_int_list
 
 # Wrapper class to maintain compatibility with existing test loop
 class BratsDatasetWrapper:
@@ -424,5 +425,7 @@ if __name__ == '__main__':
                         help='Which modality to synthesize (T1, T2, FLAIR, or T1CE)')
     args = parser.parse_args()
 
+    args.attn_resolutions = _as_int_list(args.attn_resolutions)
+    args.fir_kernel       = _as_int_list(args.fir_kernel)
     sample_and_test(args)
 

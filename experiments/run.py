@@ -19,6 +19,7 @@ STORE_FALSE_FLAGS = {
 # Keys that argparse expects as a single argument (string), even if YAML provides a list
 LIST_AS_COMMA_FLAGS = {"attn_resolutions", "fir_kernel"}
 
+
 def append_args(cmd, args_dict):
     for key, val in args_dict.items():
         if val is None:
