@@ -684,7 +684,7 @@ def init_processes(rank, size, fn, args):
     # Robustly pin each child to exactly ONE CUDA device
     vis = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     
-    print(f"[rank {rank}] pinned to GPU {gpu}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}", flush=True)
+    print(f"[rank: {rank}] pre-pinning to GPU, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}", flush=True)
 
     if vis:
         devs = [d.strip() for d in vis.split(",") if d.strip() != ""]
@@ -698,6 +698,9 @@ def init_processes(rank, size, fn, args):
         gpu = local_idx
 
     torch.cuda.set_device(gpu)
+
+    print(f"[rank: {rank}] pinned to GPU {gpu}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}", flush=True)
+
 
     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
     fn(rank, gpu, args)
