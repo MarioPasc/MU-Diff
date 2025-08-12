@@ -678,8 +678,25 @@ def init_processes(rank, size, fn, args):
     os.environ['MASTER_ADDR'] = args.master_address
     os.environ['MASTER_PORT'] = args.port_num
 
-    # map global rank to local GPU index (single-node assumption)
-    gpu = rank % args.num_process_per_node
+    # Map global rank -> local index (0..num_process_per_node-1)
+    local_idx = rank % args.num_process_per_node
+
+    # Robustly pin each child to exactly ONE CUDA device
+    vis = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    
+    print(f"[rank {rank}] pinned to GPU {gpu}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}", flush=True)
+
+    if vis:
+        devs = [d.strip() for d in vis.split(",") if d.strip() != ""]
+        if local_idx < len(devs):
+            # Restrict visibility to a single GPU for this child
+            os.environ["CUDA_VISIBLE_DEVICES"] = devs[local_idx]
+            gpu = 0  # in this process, the only visible device is index 0
+        else:
+            gpu = local_idx
+    else:
+        gpu = local_idx
+
     torch.cuda.set_device(gpu)
 
     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
