@@ -17,6 +17,7 @@ from torch.multiprocessing import Process
 import torch.distributed as dist
 import shutil
 from skimage.metrics import peak_signal_noise_ratio as psnr
+# Revert to stable import (torch.amp may not exist in current version)
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.checkpoint import checkpoint
 
@@ -52,6 +53,15 @@ class BratsDatasetWrapper:
         
         return x1, x2, x3, x4
 
+# Memory logging helper (rank 0 only)
+RANK = int(os.environ.get("RANK", "0"))
+
+def log_cuda(tag):
+    if RANK == 0 and torch.cuda.is_available():
+        alloc = torch.cuda.memory_allocated() / 1024**2
+        reserv = torch.cuda.memory_reserved() / 1024**2
+        maxa = torch.cuda.max_memory_allocated() / 1024**2
+        print(f"[MEM] {tag}: alloc={alloc:.0f}MB reserved={reserv:.0f}MB max={maxa:.0f}MB", flush=True)
 
 def copy_source(file, output_dir):
     shutil.copyfile(file, os.path.join(output_dir, os.path.basename(file)))
@@ -235,21 +245,16 @@ def sample_posterior_combine(coefficients, x_0_1, x_0_2, x_t, t):
 
 def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3, n_time, x_init, T, opt):
     x = x_init
-
     with torch.no_grad():
         for i in reversed(range(n_time)):
             t = torch.full((x.size(0),), i, dtype=torch.int64).to(x.device)
-
             t_time = t
-            latent_z = torch.randn(x.size(0), opt.nz, device=x.device)  # .to(x.device)
-            # Use autocast for inference sampling
-            with autocast():
+            latent_z = torch.randn(x.size(0), opt.nz, device=x.device)
+            with autocast(dtype=torch.bfloat16 if opt.use_bf16 else torch.float16):
                 x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
                 x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
-
                 x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
             x = x_new.detach()
-
     return x
 
 
@@ -275,6 +280,7 @@ def train_mudiff(rank, gpu, args):
     torch.cuda.manual_seed(args.seed + rank)
     torch.cuda.manual_seed_all(args.seed + rank)
     device = torch.device('cuda:{}'.format(gpu))
+    torch.backends.cudnn.benchmark = True
 
     batch_size = args.batch_size
 
@@ -313,15 +319,15 @@ def train_mudiff(rank, gpu, args):
     critic_criterian = nn.BCEWithLogitsLoss(reduction='none')
 
     # networks performing reverse denoising
-    gen_diffusive_1 = NCSNpp(args).to(device)
-    gen_diffusive_2 = NCSNpp_adaptive(args).to(device)
+    gen_diffusive_1 = NCSNpp(args).to(device, memory_format=torch.channels_last)
+    gen_diffusive_2 = NCSNpp_adaptive(args).to(device, memory_format=torch.channels_last)
 
     args.num_channels = 1
     att_conv = conv2d(64 * 8, 1, 1, padding=0).cuda()
 
     disc_diffusive_2 = Discriminator_large(nc=2, ngf=args.ngf,
                                            t_emb_dim=args.t_emb_dim,
-                                           act=nn.LeakyReLU(0.2)).to(device)
+                                           act=nn.LeakyReLU(0.2)).to(device, memory_format=torch.channels_last)
 
     broadcast_params(gen_diffusive_1.parameters())
     broadcast_params(gen_diffusive_2.parameters())
@@ -427,10 +433,11 @@ def train_mudiff(rank, gpu, args):
             optimizer_disc_diffusive_2.zero_grad(set_to_none=True)
 
             # sample from p(x_0)
-            cond_data1 = x1.to(device, non_blocking=True)
-            cond_data2 = x2.to(device, non_blocking=True)
-            cond_data3 = x3.to(device, non_blocking=True)
-            real_data = x4.to(device, non_blocking=True)
+            cond_data1 = x1.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            cond_data2 = x2.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            cond_data3 = x3.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            real_data = x4.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            log_cuda('after data load (D step)')
 
             t2 = torch.randint(0, args.num_timesteps, (real_data.size(0),), device=device)
 
@@ -438,7 +445,7 @@ def train_mudiff(rank, gpu, args):
             x2_t.requires_grad = True
 
             # train discriminator with real
-            with autocast():
+            with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
                 D2_real, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                 errD2_real2 = F.softplus(-D2_real).mean()
 
@@ -468,40 +475,21 @@ def train_mudiff(rank, gpu, args):
                     grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
                     scaler_d.scale(grad_penalty2).backward()
 
-            # train with fake
+            # train with fake (wrap generator forwards in no_grad to avoid building G graph)
             latent_z2 = torch.randn(batch_size, nz, device=device)
-
-            with autocast():
-                x_tp1_det = x2_tp1.detach()
-                if args.use_grad_checkpoint:
-                    # Ensure at least one input requires grad for checkpoint to work
-                    x_in = x_tp1_det.requires_grad_()
-                    x2_0_predict_diff_g1 = checkpoint(run_g1, x_in, cond_data1, cond_data2, cond_data3, t2, latent_z2)
-                else:
+            # Fake generation for D under no_grad to avoid retaining G graph
+            with torch.no_grad():
+                with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
+                    x_tp1_det = x2_tp1.detach()
                     x2_0_predict_diff_g1 = run_g1(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2)
-
-                if args.use_grad_checkpoint:
-                    x2_0_predict_diff_g2 = checkpoint(
-                        run_g2,
-                        x_tp1_det,
-                        cond_data1,
-                        cond_data2,
-                        cond_data3,
-                        t2,
-                        latent_z2,
-                        x2_0_predict_diff_g1[:, [0], :]
-                    )
-                else:
                     x2_0_predict_diff_g2 = run_g2(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2,
                                                   x2_0_predict_diff_g1[:, [0], :])
-
-                x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
-                x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
-
-                # D output for fake sample x_pos_sample
-                output2_g1, _ = disc_diffusive_2(x2_pos_sample_g1, t2, x2_tp1.detach())
-                output2_g2, _ = disc_diffusive_2(x2_pos_sample_g2, t2, x2_tp1.detach())
-
+                    x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
+                    x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
+                log_cuda('after fake generation (D step)')
+            with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
+                output2_g1, _ = disc_diffusive_2(x2_pos_sample_g1.detach(), t2, x2_tp1.detach())
+                output2_g2, _ = disc_diffusive_2(x2_pos_sample_g2.detach(), t2, x2_tp1.detach())
                 errD2_fake2_g1 = (F.softplus(output2_g1)).mean()
                 errD2_fake2_g2 = (F.softplus(output2_g2)).mean()
                 errD_fake2 = errD2_fake2_g1 + errD2_fake2_g2
@@ -514,10 +502,10 @@ def train_mudiff(rank, gpu, args):
             for p in disc_diffusive_2.parameters():
                 p.requires_grad = False
 
-            cond_data1 = x1.to(device, non_blocking=True)
-            cond_data2 = x2.to(device, non_blocking=True)
-            cond_data3 = x3.to(device, non_blocking=True)
-            real_data = x4.to(device, non_blocking=True)
+            cond_data1 = x1.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            cond_data2 = x2.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            cond_data3 = x3.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            real_data = x4.to(device, non_blocking=True).to(memory_format=torch.channels_last)
 
             optimizer_gen_diffusive_1.zero_grad(set_to_none=True)
             optimizer_gen_diffusive_2.zero_grad(set_to_none=True)
@@ -529,7 +517,7 @@ def train_mudiff(rank, gpu, args):
 
             latent_z2 = torch.randn(batch_size, nz, device=device)
 
-            with autocast():
+            with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
                 x_tp1_det = x2_tp1.detach()
                 if args.use_grad_checkpoint:
                     x_in = x_tp1_det.requires_grad_()
@@ -587,10 +575,9 @@ def train_mudiff(rank, gpu, args):
             scaler_g.update()
 
             global_step += 1
-            if iteration % 100 == 0:
-                if rank == 0:
-                    print('epoch {} iteration{},  G-Adv: {}, G-Sum: {}'.format(epoch, iteration,
-                                                                               errG_adv.item(), errG.item()))
+            if iteration % 100 == 0 and rank == 0:
+                log_cuda('after G update')
+                print('epoch {} iteration{},  G-Adv: {}, G-Sum: {}'.format(epoch, iteration, errG_adv.item(), errG.item()))
 
         if not args.no_lr_decay:
             scheduler_gen_diffusive_1.step()
@@ -654,10 +641,10 @@ def train_mudiff(rank, gpu, args):
                     optimizer_gen_diffusive_2.swap_parameters_with_ema(store_params_in_ema=True)
 
         for iteration, (x1_val, x2_val, x3_val, x4_val) in enumerate(data_loader_val):
-            cond_data1_val = x1_val.to(device, non_blocking=True)
-            cond_data2_val = x2_val.to(device, non_blocking=True)
-            cond_data3_val = x3_val.to(device, non_blocking=True)
-            real_data_val = x4_val.to(device, non_blocking=True)
+            cond_data1_val = x1_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            cond_data2_val = x2_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            cond_data3_val = x3_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+            real_data_val = x4_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
 
             x_t = torch.randn_like(real_data)
 
@@ -824,6 +811,8 @@ if __name__ == '__main__':
     # New flag to enable gradient checkpointing for memory savings
     parser.add_argument('--use_grad_checkpoint', action='store_true', default=False,
                         help='Enable gradient checkpointing on generator forwards to save memory')
+    parser.add_argument('--use_bf16', action='store_true', default=True,
+                        help='Use bfloat16 autocast for reduced memory (default on)')
 
     args = parser.parse_args()
     args.world_size = args.num_proc_node * args.num_process_per_node
@@ -846,5 +835,4 @@ if __name__ == '__main__':
         for p in processes:
             p.join()
     else:
-
         init_processes(0, size, train_mudiff, args)

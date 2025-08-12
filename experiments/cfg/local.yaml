@@ -63,7 +63,7 @@ experiments:
       
       # Regularization
       r1_gamma: 0.05
-      lazy_reg: null  # set to integer if needed
+      lazy_reg: 16  # enable lazy R1 every 16 steps
       
       # Loss weights
       lambda_l1_loss: 0.5
@@ -190,7 +190,7 @@ experiments:
       
       # Regularization
       r1_gamma: 0.05
-      lazy_reg: null
+      lazy_reg: 16
       
       # Loss weights
       lambda_l1_loss: 0.5
@@ -317,7 +317,7 @@ experiments:
       
       # Regularization
       r1_gamma: 0.05
-      lazy_reg: null
+      lazy_reg: 16
       
       # Loss weights
       lambda_l1_loss: 0.5
@@ -444,7 +444,7 @@ experiments:
       
       # Regularization
       r1_gamma: 0.05
-      lazy_reg: null
+      lazy_reg: 16
       
       # Loss weights
       lambda_l1_loss: 0.5
