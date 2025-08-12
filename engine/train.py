@@ -4,6 +4,11 @@ import numpy as np
 
 import os
 
+os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "1")   # serialized kernels → accurate trace
+os.environ.setdefault("NCCL_DEBUG", "WARN")          # INFO if you want more detail
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # better allocator behavior
+
+
 from backbones.dense_layer import conv2d
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
@@ -672,8 +677,11 @@ def init_processes(rank, size, fn, args):
     """ Initialize the distributed environment. """
     os.environ['MASTER_ADDR'] = args.master_address
     os.environ['MASTER_PORT'] = args.port_num
-    torch.cuda.set_device(args.local_rank)
-    gpu = args.local_rank
+
+    # map global rank to local GPU index (single-node assumption)
+    gpu = rank % args.num_process_per_node
+    torch.cuda.set_device(gpu)
+
     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
     fn(rank, gpu, args)
     dist.barrier()
@@ -694,6 +702,10 @@ def _as_int_list(v):
 
 # %%
 if __name__ == '__main__':
+    
+    import torch.multiprocessing as mp
+    mp.set_start_method('spawn', force=True)
+    
     parser = argparse.ArgumentParser('mudiff parameters')
     parser.add_argument('--seed', type=int, default=1024,
                         help='seed used for initialization')
@@ -823,12 +835,11 @@ if __name__ == '__main__':
     if size > 1:
         processes = []
         for rank in range(size):
-            args.local_rank = rank
             global_rank = rank + args.node_rank * args.num_process_per_node
             global_size = args.num_proc_node * args.num_process_per_node
-            args.global_rank = global_rank
+            p = Process(target=init_processes, args=(global_rank, global_size, train_mudiff, args), daemon=False)
+
             print('Node rank %d, local proc %d, global proc %d' % (args.node_rank, rank, global_rank))
-            p = Process(target=init_processes, args=(global_rank, global_size, train_mudiff, args))
             p.start()
             processes.append(p)
 
