@@ -473,7 +473,7 @@ class ConvBlock_GAP(nn.Module):
         self.adaptive_gap = nn.AdaptiveAvgPool2d(1)  # Output size of (1, 1)
 
         # Fully connected layer
-        self.fc = nn.Linear(64, 256)
+        self.fc = dense(out_ch, zemb_dim)
 
     def forward(self, x):
         # First convolutional layer
@@ -490,6 +490,12 @@ class ConvBlock_GAP(nn.Module):
 
         out = self.adaptive_gap(out)
         output_gap = out.view(out.size(0), -1)
+        
+        if not hasattr(self, "_printed"):
+            print(f"[GAP] in={output_gap.shape[1]}  fc.in={self.fc.in_features}  fc.out={self.fc.out_features}", flush=True)
+            self._printed = True
+        assert output_gap.shape[1] == self.fc.in_features, \
+            f"GAP vector {output_gap.shape[1]} != fc.in_features {self.fc.in_features}"
         out = self.fc(output_gap)
 
         return out

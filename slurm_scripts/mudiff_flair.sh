@@ -43,7 +43,6 @@ echo "====================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Job Name: $SLURM_JOB_NAME"
 echo "Node: $SLURM_NODELIST"
-echo "Number of GPUs: $SLURM_GPUS_ON_NODE"
 echo "CPUs per task: $SLURM_CPUS_PER_TASK"
 echo "Memory: $SLURM_MEM_PER_NODE MB"
 echo "Start Time: $(date)"
@@ -71,7 +70,7 @@ echo "PYTHONPATH: $PYTHONPATH"
 # Set multiprocessing method for PyTorch distributed training
 export TORCH_DISTRIBUTED_DEBUG=INFO
 export TORCH_CUDA_ARCH_LIST="8.0"
-export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
 export TORCH_SHOW_CPP_STACKTRACES=1
 

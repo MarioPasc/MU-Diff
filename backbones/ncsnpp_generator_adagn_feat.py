@@ -731,6 +731,13 @@ class NCSNpp_adaptive(nn.Module):
             input_pyramid = x
 
         pseudo_weight = modules[m_idx](pseudo_target)
+        
+        if not hasattr(self, "_printed_adagn"):
+            head = modules[m_idx-1]
+            print(f"[ADAGN] pseudo_target={tuple(pseudo_target.shape)}  "
+                f"head.fc={head.fc.in_features}->{head.fc.out_features}", flush=True)
+            self._printed_adagn = True
+                
         m_idx += 1
 
         x_feat = modules[m_idx](x)
