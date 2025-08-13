@@ -22,10 +22,11 @@ from torch.multiprocessing import Process
 import torch.distributed as dist
 import shutil
 from skimage.metrics import peak_signal_noise_ratio as psnr
-# Revert to stable import (torch.amp may not exist in current version)
-from torch.cuda.amp import autocast, GradScaler
+
+from torch.amp import autocast, GradScaler 
 from torch.utils.checkpoint import checkpoint
 
+import sys
 
 class BratsDatasetWrapper:
     """
@@ -255,7 +256,7 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
             t = torch.full((x.size(0),), i, dtype=torch.int64).to(x.device)
             t_time = t
             latent_z = torch.randn(x.size(0), opt.nz, device=x.device)
-            with autocast(dtype=torch.bfloat16 if opt.use_bf16 else torch.float16):
+            with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                 x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
                 x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
                 x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
@@ -346,8 +347,8 @@ def train_mudiff(rank, gpu, args):
     optimizer_gen_diffusive_2 = optim.Adam(gen_diffusive_2.parameters(), lr=args.lr_g, betas=(args.beta1, args.beta2))
 
     # AMP scalers
-    scaler_d = GradScaler()
-    scaler_g = GradScaler()
+    scaler_d = GradScaler('cuda')
+    scaler_g = GradScaler('cuda')
 
     if args.use_ema:
         optimizer_gen_diffusive_1 = EMA(optimizer_gen_diffusive_1, ema_decay=args.ema_decay)
@@ -371,7 +372,7 @@ def train_mudiff(rank, gpu, args):
 
     output_path = args.output_path
 
-    exp_path = os.path.join(output_path, exp)
+    exp_path = output_path
     if rank == 0:
         # Restore provenance copy: save a snapshot of this script and the backbones/ dir
         if not os.path.exists(exp_path):
@@ -450,7 +451,7 @@ def train_mudiff(rank, gpu, args):
             x2_t.requires_grad = True
 
             # train discriminator with real
-            with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
+            with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                 D2_real, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                 errD2_real2 = F.softplus(-D2_real).mean()
 
@@ -484,7 +485,7 @@ def train_mudiff(rank, gpu, args):
             latent_z2 = torch.randn(batch_size, nz, device=device)
             # Fake generation for D under no_grad to avoid retaining G graph
             with torch.no_grad():
-                with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
+                with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                     x_tp1_det = x2_tp1.detach()
                     x2_0_predict_diff_g1 = run_g1(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2)
                     x2_0_predict_diff_g2 = run_g2(x_tp1_det, cond_data1, cond_data2, cond_data3, t2, latent_z2,
@@ -492,7 +493,7 @@ def train_mudiff(rank, gpu, args):
                     x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
                     x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
                 log_cuda('after fake generation (D step)')
-            with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
+            with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                 output2_g1, _ = disc_diffusive_2(x2_pos_sample_g1.detach(), t2, x2_tp1.detach())
                 output2_g2, _ = disc_diffusive_2(x2_pos_sample_g2.detach(), t2, x2_tp1.detach())
                 errD2_fake2_g1 = (F.softplus(output2_g1)).mean()
@@ -522,7 +523,7 @@ def train_mudiff(rank, gpu, args):
 
             latent_z2 = torch.randn(batch_size, nz, device=device)
 
-            with autocast(dtype=torch.bfloat16 if args.use_bf16 else torch.float16):
+            with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                 x_tp1_det = x2_tp1.detach()
                 if args.use_grad_checkpoint:
                     x_in = x_tp1_det.requires_grad_()
@@ -843,8 +844,8 @@ if __name__ == '__main__':
     # New flag to enable gradient checkpointing for memory savings
     parser.add_argument('--use_grad_checkpoint', action='store_true', default=False,
                         help='Enable gradient checkpointing on generator forwards to save memory')
-    parser.add_argument('--use_bf16', action='store_true', default=True,
-                        help='Use bfloat16 autocast for reduced memory (default on)')
+    parser.add_argument('--use_bf16', action='store_true', default=False,
+                        help='Use bfloat16 autocast for reduced memory (default off)')
 
     args = parser.parse_args()
     args.world_size = args.num_proc_node * args.num_process_per_node
@@ -865,5 +866,9 @@ if __name__ == '__main__':
 
         for p in processes:
             p.join()
+        # Propaga fallo si algún hijo cayó
+        bad = [p.exitcode for p in processes if p.exitcode not in (0, None)]
+        if bad:
+            sys.exit(1)
     else:
         init_processes(0, size, train_mudiff, args)

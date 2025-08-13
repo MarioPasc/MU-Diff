@@ -8,6 +8,7 @@ import yaml
 STORE_TRUE_FLAGS = {
     # train.py
     "use_geometric", "use_ema", "not_use_tanh", "no_lr_decay", "save_content",
+    "use_bf16",
     # test.py
     "compute_fid",
 }

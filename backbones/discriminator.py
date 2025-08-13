@@ -84,6 +84,10 @@ class DownConvBlock(nn.Module):
        
         if self.downsample:
             out = up_or_down_sampling.downsample_2d(out, self.fir_kernel, factor=2)
+            if not hasattr(self, "_logged_once"):
+                print(f"[D] downsample_2d in_dtype={out.dtype}, shape={tuple(out.shape)}")
+                self._logged_once = True
+
             input = up_or_down_sampling.downsample_2d(input, self.fir_kernel, factor=2)
         out = self.conv2(out)
         

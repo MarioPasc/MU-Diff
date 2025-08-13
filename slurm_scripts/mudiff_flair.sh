@@ -73,6 +73,8 @@ export TORCH_DISTRIBUTED_DEBUG=INFO
 export TORCH_CUDA_ARCH_LIST="8.0"
 export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
+export TORCH_SHOW_CPP_STACKTRACES=1
+
 
 # Check GPU availability
 echo "Available GPUs:"
