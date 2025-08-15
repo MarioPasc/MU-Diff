@@ -59,13 +59,11 @@ source load mudiff
 # Check Python and CUDA installation
 echo "Python version: $(python --version)"
 echo "CUDA version: $(nvcc --version | grep release)"
-echo
-
-# Set CUDA environment variables for 2 GPUs
-export CUDA_VISIBLE_DEVICES=0,1
+echo "CUDA_VISIBLE_DEVICES (SLURM): $CUDA_VISIBLE_DEVICES"
 # Ensure Python can import project packages (backbones, dataset, etc.)
 export PYTHONPATH="$REPO_ROOT:$PYTHONPATH"
 echo "PYTHONPATH: $PYTHONPATH"
+echo
 
 # Set multiprocessing method for PyTorch distributed training
 export TORCH_DISTRIBUTED_DEBUG=INFO
@@ -73,24 +71,6 @@ export TORCH_CUDA_ARCH_LIST="8.0"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
 export TORCH_SHOW_CPP_STACKTRACES=1
-
-
-# Check GPU availability
-echo "Available GPUs:"
-nvidia-smi
-echo
-
-# Check that we have exactly 2 GPUs
-GPU_COUNT=$(nvidia-smi -L | wc -l)
-if [ $GPU_COUNT -lt 2 ]; then
-    echo "ERROR: MU-Diff requires at least 2 GPUs, but only $GPU_COUNT found!"
-    exit 1
-fi
-echo "GPU count verified: $GPU_COUNT GPUs available"
-echo
-
-# Navigate to experiment directory (use absolute paths instead)
-# cd experiments
 
 # Verify configuration file exists
 if [ ! -f "$CONFIG_FILE" ]; then

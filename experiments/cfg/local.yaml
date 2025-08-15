@@ -49,7 +49,7 @@ experiments:
       ngf: 64
       
       # Training settings
-      batch_size: 8
+      batch_size: 2
       num_epoch: 30
       lr_g: 1.6e-4
       lr_d: 1.0e-4
@@ -176,7 +176,7 @@ experiments:
       ngf: 64
       
       # Training settings
-      batch_size: 8
+      batch_size: 2
       num_epoch: 30
       lr_g: 1.6e-4
       lr_d: 1.0e-4
@@ -303,7 +303,7 @@ experiments:
       ngf: 64
       
       # Training settings
-      batch_size: 8
+      batch_size: 2
       num_epoch: 30
       lr_g: 1.6e-4
       lr_d: 1.0e-4
@@ -430,7 +430,7 @@ experiments:
       ngf: 64
       
       # Training settings
-      batch_size: 8
+      batch_size: 2
       num_epoch: 30
       lr_g: 1.6e-4
       lr_d: 1.0e-4

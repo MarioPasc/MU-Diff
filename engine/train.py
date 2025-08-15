@@ -329,7 +329,7 @@ def train_mudiff(rank, gpu, args):
     gen_diffusive_2 = NCSNpp_adaptive(args).to(device, memory_format=torch.channels_last)
 
     args.num_channels = 1
-    att_conv = conv2d(64 * 8, 1, 1, padding=0).cuda()
+    att_conv = conv2d(64 * 8, 1, 1, padding=0).to(device, memory_format=torch.channels_last)
 
     disc_diffusive_2 = Discriminator_large(nc=2, ngf=args.ngf,
                                            t_emb_dim=args.t_emb_dim,
@@ -363,12 +363,19 @@ def train_mudiff(rank, gpu, args):
                                                                             eta_min=1e-5)
 
     # ddp
-    gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, device_ids=[gpu])
-    gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, device_ids=[gpu])
+    # gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, device_ids=[gpu])
+    # gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, device_ids=[gpu])
+    # disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, device_ids=[gpu])
+    ddp_kwargs = dict(
+        device_ids=[gpu],
+        broadcast_buffers=False,           # evita sync de buffers (reduce memoria/overhead)
+        gradient_as_bucket_view=True,      # grads como vistas → menos copias
+        static_graph=True                  # grafo estable → menos metadatos
+    )
+    gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, **ddp_kwargs)
+    gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, **ddp_kwargs)
+    disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, **ddp_kwargs)
 
-    disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, device_ids=[gpu])
-
-    exp = args.exp
 
     output_path = args.output_path
 
@@ -456,7 +463,7 @@ def train_mudiff(rank, gpu, args):
                 errD2_real2 = F.softplus(-D2_real).mean()
 
             errD_real2 = errD2_real2
-            scaler_d.scale(errD_real2).backward(retain_graph=True)
+            # scaler_d.scale(errD_real2).backward(retain_graph=True)
 
             if args.lazy_reg is None:
 
@@ -468,7 +475,7 @@ def train_mudiff(rank, gpu, args):
                 ).mean()
 
                 grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                scaler_d.scale(grad_penalty2).backward()
+                #scaler_d.scale(grad_penalty2).backward()
             else:
                 if global_step % args.lazy_reg == 0:
                     grad2_real = torch.autograd.grad(
@@ -479,7 +486,7 @@ def train_mudiff(rank, gpu, args):
                     ).mean()
 
                     grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                    scaler_d.scale(grad_penalty2).backward()
+                    #scaler_d.scale(grad_penalty2).backward()
 
             # train with fake (wrap generator forwards in no_grad to avoid building G graph)
             latent_z2 = torch.randn(batch_size, nz, device=device)
@@ -500,7 +507,9 @@ def train_mudiff(rank, gpu, args):
                 errD2_fake2_g2 = (F.softplus(output2_g2)).mean()
                 errD_fake2 = errD2_fake2_g1 + errD2_fake2_g2
 
-            scaler_d.scale(errD_fake2).backward()
+            # scaler_d.scale(errD_fake2).backward()
+            d_total = errD_real2 + grad_penalty2 + errD_fake2
+            scaler_d.scale(d_total).backward()
 
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
@@ -591,7 +600,10 @@ def train_mudiff(rank, gpu, args):
 
             scheduler_disc_diffusive_2.step()
 
+        torch.cuda.reset_peak_memory_stats()
         if rank == 0:
+            peak = torch.cuda.max_memory_allocated() / 1024**2
+            print(f"[MEM] epoch {epoch} peak_alloc={peak:.0f}MB", flush=True)
             if epoch % 10 == 0:
                 torchvision.utils.save_image(x2_pos_sample_g1,
                                              os.path.join(exp_path, 'xposg1_epoch_{}.png'.format(epoch)),
