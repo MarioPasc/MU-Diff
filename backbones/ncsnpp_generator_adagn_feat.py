@@ -734,8 +734,22 @@ class NCSNpp_adaptive(nn.Module):
         
         if not hasattr(self, "_printed_adagn"):
             head = modules[m_idx-1]
-            print(f"[ADAGN] pseudo_target={tuple(pseudo_target.shape)}  "
-                f"head.fc={head.fc.in_features}->{head.fc.out_features}", flush=True)
+            print(f"[ADAGN] pseudo_target={tuple(pseudo_target.shape)}")
+
+            # Safe introspection (Linear / Sequential / modules with .fc or .out_proj)
+            try:
+                in_f = head.fc.in_features; out_f = head.fc.out_features
+            except AttributeError:
+                if hasattr(head, "in_features") and hasattr(head, "out_features"):
+                    in_f, out_f = head.in_features, head.out_features           # e.g., nn.Linear
+                elif hasattr(head, "out_proj") and hasattr(head.out_proj, "in_features"):
+                    in_f, out_f = head.out_proj.in_features, head.out_proj.out_features  # some HF heads
+                elif hasattr(head, "weight"):
+                    in_f, out_f = head.weight.shape[1], head.weight.shape[0]    # last resort
+                else:
+                    in_f = out_f = "unknown"
+            print(f"head={head.__class__.__name__} {in_f}->{out_f}", flush=True)
+
             self._printed_adagn = True
                 
         m_idx += 1
