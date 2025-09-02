@@ -440,8 +440,14 @@ def train_mudiff(rank, gpu, args):
         # train_sampler.set_epoch(epoch)
 
         for iteration, (x1, x2, x3, x4) in enumerate(data_loader):
+            # ---- D step ----
+            # Enable D grads, disable G grads (extra safety even though we use no_grad for G forwards)
             for p in disc_diffusive_2.parameters():
-                p.requires_grad = True
+                p.requires_grad_(True)
+            for p in gen_diffusive_1.parameters():
+                p.requires_grad_(False)
+            for p in gen_diffusive_2.parameters():
+                p.requires_grad_(False)
 
             optimizer_disc_diffusive_2.zero_grad(set_to_none=True)
 
@@ -509,13 +515,31 @@ def train_mudiff(rank, gpu, args):
 
             # scaler_d.scale(errD_fake2).backward()
             d_total = errD_real2 + grad_penalty2 + errD_fake2
+            # Debug prints before D backward (rank 0 only to avoid log spam)
+            if rank == 0:
+                def _dbg(tag, t):
+                    try:
+                        print(f"[rank {rank}] {tag}: dev={t.device} req_grad={t.requires_grad} "
+                              f"shape={tuple(t.shape)} is_leaf={getattr(t, 'is_leaf', 'NA')}", flush=True)
+                    except Exception:
+                        pass
+                _dbg("fake1_D", x2_pos_sample_g1)
+                _dbg("fake2_D", x2_pos_sample_g2)
+                _dbg("target0", x2_t)
+                _dbg("d_total", d_total)
             scaler_d.scale(d_total).backward()
 
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
 
+            # ---- G step ----
+            # Disable D grads, enable G grads
             for p in disc_diffusive_2.parameters():
-                p.requires_grad = False
+                p.requires_grad_(False)
+            for p in gen_diffusive_1.parameters():
+                p.requires_grad_(True)
+            for p in gen_diffusive_2.parameters():
+                p.requires_grad_(True)
 
             cond_data1 = x1.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             cond_data2 = x2.to(device, non_blocking=True).to(memory_format=torch.channels_last)
@@ -603,6 +627,17 @@ def train_mudiff(rank, gpu, args):
 
                 errG = errG_adv + (args.lambda_l1_loss * errG_L1) + (args.lambda_mask_loss * mask_loss)
 
+            # Debug prints before G backward (rank 0 only)
+            if rank == 0:
+                def _dbg2(tag, t):
+                    try:
+                        print(f"[rank {rank}] {tag}: dev={t.device} req_grad={t.requires_grad} "
+                              f"shape={tuple(t.shape)} is_leaf={getattr(t, 'is_leaf', 'NA')}", flush=True)
+                    except Exception:
+                        pass
+                _dbg2("out1_G", x2_pos_sample_g1)
+                _dbg2("out2_G0", x2_pos_sample_g2)
+                _dbg2("g_total", errG)
             scaler_g.scale(errG).backward()
             scaler_g.step(optimizer_gen_diffusive_1)
             scaler_g.step(optimizer_gen_diffusive_2)
