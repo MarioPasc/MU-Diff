@@ -23,7 +23,7 @@ import torch.distributed as dist
 import shutil
 from skimage.metrics import peak_signal_noise_ratio as psnr
 
-from torch.amp import autocast, GradScaler 
+from torch.amp import autocast, GradScaler #type: ignore
 from torch.utils.checkpoint import checkpoint
 
 import sys
@@ -564,10 +564,29 @@ def train_mudiff(rank, gpu, args):
                 output2_g2, att_feat_g2 = disc_diffusive_2(x2_pos_sample_g2, t2, x2_tp1.detach())
 
                 att_map_g1 = torch.sigmoid(att_conv(att_feat_g1))
-                att_map_g1 = F.interpolate(att_map_g1, size=(256, 256), mode='bilinear', align_corners=False)
-
+                H, W = x2_pos_sample_g1.shape[-2], x2_pos_sample_g1.shape[-1]
+                att_map_g1 = F.interpolate(att_map_g1, size=(H, W), mode='bilinear', align_corners=False)
+                
                 att_map_g2 = torch.sigmoid(att_conv(att_feat_g2))
-                att_map_g2 = F.interpolate(att_map_g2, size=(256, 256), mode='bilinear', align_corners=False)
+                att_map_g2 = F.interpolate(att_map_g2, size=(H, W), mode='bilinear', align_corners=False)
+
+                def _sh(name, t):
+                    print(f"[rank {rank}] {name}: shape={tuple(t.shape)} "
+                        f"min={t.min().item():.3g} max={t.max().item():.3g}", flush=True)
+
+                _sh("x2_pos_sample_g1", x2_pos_sample_g1)
+                _sh("x2_pos_sample_g2", x2_pos_sample_g2)
+                _sh("att_feat_g1", att_feat_g1)
+                _sh("att_feat_g2", att_feat_g2)
+                _sh("att_map_g1(resized)", att_map_g1)
+                _sh("att_map_g2(resized)", att_map_g2)
+
+                # sanity checks before using them
+                assert att_map_g1.shape == x2_pos_sample_g2.shape, \
+                    f"att_map_g1 {att_map_g1.shape} vs x2_pos_sample_g2 {x2_pos_sample_g2.shape}"
+                assert att_map_g2.shape == x2_pos_sample_g1.shape, \
+                    f"att_map_g2 {att_map_g2.shape} vs x2_pos_sample_g1 {x2_pos_sample_g1.shape}"
+
 
                 mask_loss_1 = (att_map_g2 * critic_criterian(x2_pos_sample_g1, torch.sigmoid(x2_pos_sample_g2))).mean()
                 mask_loss_2 = (att_map_g1 * critic_criterian(x2_pos_sample_g2, torch.sigmoid(x2_pos_sample_g1))).mean()
@@ -716,13 +735,12 @@ def init_processes(rank, size, fn, args):
 
 
     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
-    fn(rank, gpu, args)
-    dist.barrier()
-    cleanup()
-
-
-def cleanup():
-    dist.destroy_process_group()
+    try:
+        fn(rank, gpu, args)
+        dist.barrier()
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 def _as_int_list(v):
     if isinstance(v, (list, tuple)):
