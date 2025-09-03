@@ -472,20 +472,11 @@ def train_mudiff(rank, gpu, args):
             # scaler_d.scale(errD_real2).backward(retain_graph=True)
 
             if args.lazy_reg is None:
-
-                grad2_real = torch.autograd.grad(
-                    outputs=D2_real.sum(), inputs=x2_t, create_graph=True
-                )[0]
-                grad2_penalty = (
-                        grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2
-                ).mean()
-
-                grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                #scaler_d.scale(grad_penalty2).backward()
-            else:
-                if global_step % args.lazy_reg == 0:
+                # AMP sometimes complicates higher-order grads. 
+                # We wrap the grad penalty computation only with autocast disabled
+                with autocast('cuda', enabled=False):
                     grad2_real = torch.autograd.grad(
-                        outputs=D2_real.sum(), inputs=x2_t, create_graph=True
+                        outputs=D2_real.sum(), inputs=x2_t, create_graph=True, retain_graph=True
                     )[0]
                     grad2_penalty = (
                             grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2
@@ -493,6 +484,18 @@ def train_mudiff(rank, gpu, args):
 
                     grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
                     #scaler_d.scale(grad_penalty2).backward()
+            else:
+                if global_step % args.lazy_reg == 0:
+                    with autocast('cuda', enabled=False):
+                        grad2_real = torch.autograd.grad(
+                            outputs=D2_real.sum(), inputs=x2_t, create_graph=True, retain_graph=True
+                        )[0]
+                        grad2_penalty = (
+                                grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2
+                        ).mean()
+
+                        grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
+                        #scaler_d.scale(grad_penalty2).backward()
 
             # train with fake (wrap generator forwards in no_grad to avoid building G graph)
             latent_z2 = torch.randn(batch_size, nz, device=device)
