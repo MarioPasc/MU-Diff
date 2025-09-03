@@ -467,35 +467,20 @@ def train_mudiff(rank, gpu, args):
             with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                 D2_real, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                 errD2_real2 = F.softplus(-D2_real).mean()
-
             errD_real2 = errD2_real2
             # scaler_d.scale(errD_real2).backward(retain_graph=True)
 
-            if args.lazy_reg is None:
-                # AMP sometimes complicates higher-order grads. 
-                # We wrap the grad penalty computation only with autocast disabled
+            grad_penalty2 = torch.zeros((), device=device, dtype=real_data.dtype)  # default 0 in case we skip
+            if args.lazy_reg is None or (global_step % args.lazy_reg == 0):
+                # re-run D at full precision to keep higher-order grads numerically stable
                 with autocast('cuda', enabled=False):
+                    D2_real_r1, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
+                    # build graph for penalty so it contributes gradients to D (R1 needs create_graph=True)
                     grad2_real = torch.autograd.grad(
-                        outputs=D2_real.sum(), inputs=x2_t, create_graph=True, retain_graph=True
+                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True
                     )[0]
-                    grad2_penalty = (
-                            grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2
-                    ).mean()
-
-                    grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                    #scaler_d.scale(grad_penalty2).backward()
-            else:
-                if global_step % args.lazy_reg == 0:
-                    with autocast('cuda', enabled=False):
-                        grad2_real = torch.autograd.grad(
-                            outputs=D2_real.sum(), inputs=x2_t, create_graph=True, retain_graph=True
-                        )[0]
-                        grad2_penalty = (
-                                grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2
-                        ).mean()
-
-                        grad_penalty2 = args.r1_gamma / 2 * grad2_penalty
-                        #scaler_d.scale(grad_penalty2).backward()
+                    grad2_penalty = (grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2).mean()
+                    grad_penalty2 = (args.r1_gamma / 2) * grad2_penalty
 
             # train with fake (wrap generator forwards in no_grad to avoid building G graph)
             latent_z2 = torch.randn(batch_size, nz, device=device)
@@ -516,8 +501,7 @@ def train_mudiff(rank, gpu, args):
                 errD2_fake2_g2 = (F.softplus(output2_g2)).mean()
                 errD_fake2 = errD2_fake2_g1 + errD2_fake2_g2
 
-            # scaler_d.scale(errD_fake2).backward()
-            d_total = errD_real2 + grad_penalty2 + errD_fake2
+
             # Debug prints before D backward (rank 0 only to avoid log spam)
             if rank == 0:
                 def _dbg(tag, t):
@@ -530,8 +514,10 @@ def train_mudiff(rank, gpu, args):
                 _dbg("fake2_D", x2_pos_sample_g2)
                 _dbg("target0", x2_t)
                 _dbg("d_total", d_total)
-            scaler_d.scale(d_total).backward()
 
+            # scaler_d.scale(errD_fake2).backward()
+            d_total = errD_real2 + grad_penalty2 + errD_fake2                
+            scaler_d.scale(d_total).backward()
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
 
