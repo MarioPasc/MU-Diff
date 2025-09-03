@@ -72,6 +72,18 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
 export TORCH_SHOW_CPP_STACKTRACES=1
 
+# unique rendezvous per job
+export MASTER_ADDR=127.0.0.1
+export MASTER_PORT=$((50000 + RANDOM % 10000))
+
+# pick the real high-speed NIC; replace ib0/eno1 with yours
+export NCCL_SOCKET_IFNAME=ib0
+# if shared-memory clashes occur on crowded nodes
+export NCCL_SHM_DISABLE=1
+# keep logs terse once stable
+export NCCL_DEBUG=WARN
+
+
 # Verify configuration file exists
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: Configuration file '$CONFIG_FILE' not found!"

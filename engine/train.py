@@ -5,7 +5,7 @@ import time
 
 import os
 
-os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "1")   # serialized kernels → accurate trace
+# os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "1")   # serialized kernels → accurate trace; ONLY FOR DEBUGGING
 os.environ.setdefault("NCCL_DEBUG", "WARN")          # INFO if you want more detail
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # better allocator behavior
 
@@ -28,6 +28,27 @@ from torch.amp import autocast, GradScaler #type: ignore
 from torch.utils.checkpoint import checkpoint
 
 import sys
+
+
+# at top-level
+if os.environ.get("MUDIFF_DEBUG_SYNC", "0") == "1":
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+else:
+    os.environ.pop("CUDA_LAUNCH_BLOCKING", None)
+
+torch.backends.cudnn.benchmark = True
+
+try:
+    # Newer PyTorch
+    torch.set_float32_matmul_precision("high") # type: ignore
+except AttributeError:
+    # Older PyTorch: approximate equivalent via TF32 flags
+    if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "matmul"):
+        torch.backends.cuda.matmul.allow_tf32 = True
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.allow_tf32 = True # type: ignore
+
+# ...existing code...
 
 class BratsDatasetWrapper:
     """
@@ -374,13 +395,11 @@ def train_mudiff(rank, gpu, args):
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset,
                                                                     num_replicas=args.world_size,
                                                                     rank=rank)
-    data_loader = torch.utils.data.DataLoader(dataset,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              num_workers=4,
-                                              pin_memory=True,
-                                              sampler=train_sampler,
-                                              drop_last=True)
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False,
+        num_workers=8, pin_memory=True, persistent_workers=True,
+        prefetch_factor=4, sampler=train_sampler, drop_last=True)
+
     val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val,
                                                                   num_replicas=args.world_size,
                                                                   rank=rank)
@@ -524,7 +543,7 @@ def train_mudiff(rank, gpu, args):
         return gen_diffusive_2(x, c1, c2, c3, t, z, prev)
 
     for epoch in range(init_epoch, args.num_epoch + 1):
-        # train_sampler.set_epoch(epoch)
+        train_sampler.set_epoch(epoch)
 
         # running loss accumulators for epoch summary
         ep_losses = {
@@ -552,7 +571,7 @@ def train_mudiff(rank, gpu, args):
             cond_data2 = x2.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             cond_data3 = x3.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             real_data = x4.to(device, non_blocking=True).to(memory_format=torch.channels_last)
-            log_cuda('after data load (D step)')
+            # log_cuda('after data load (D step)')
 
             t2 = torch.randint(0, args.num_timesteps, (real_data.size(0),), device=device)
 
@@ -589,7 +608,7 @@ def train_mudiff(rank, gpu, args):
                                                   x2_0_predict_diff_g1[:, [0], :])
                     x2_pos_sample_g1 = sample_posterior(pos_coeff, x2_0_predict_diff_g1[:, [0], :], x2_tp1, t2)
                     x2_pos_sample_g2 = sample_posterior(pos_coeff, x2_0_predict_diff_g2[:, [0], :], x2_tp1, t2)
-                log_cuda('after fake generation (D step)')
+                #log_cuda('after fake generation (D step)')
             with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
                 output2_g1, _ = disc_diffusive_2(x2_pos_sample_g1.detach(), t2, x2_tp1.detach())
                 output2_g2, _ = disc_diffusive_2(x2_pos_sample_g2.detach(), t2, x2_tp1.detach())
