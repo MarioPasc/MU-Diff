@@ -1,6 +1,7 @@
 import argparse
 import torch
 import numpy as np
+import time
 
 import os
 
@@ -68,6 +69,81 @@ def log_cuda(tag):
         reserv = torch.cuda.memory_reserved() / 1024**2
         maxa = torch.cuda.max_memory_allocated() / 1024**2
         print(f"[MEM] {tag}: alloc={alloc:.0f}MB reserved={reserv:.0f}MB max={maxa:.0f}MB", flush=True)
+
+# Pretty, structured logger for per-step and per-epoch summaries (rank 0)
+def _mem_stats():
+    if not torch.cuda.is_available():
+        return dict(alloc_mb=0.0, reserved_mb=0.0, max_alloc_mb=0.0)
+    return dict(
+        alloc_mb=torch.cuda.memory_allocated() / 1024**2,
+        reserved_mb=torch.cuda.memory_reserved() / 1024**2,
+        max_alloc_mb=torch.cuda.max_memory_allocated() / 1024**2,
+    )
+
+def _lr_of(optim):
+    try:
+        for g in optim.param_groups:
+            return float(g.get('lr', 0.0))
+    except Exception:
+        return 0.0
+    return 0.0
+
+def log_step(scope, epoch, iteration, global_step, losses, lrs, times, batch_size, world_size, scaler_g=None, scaler_d=None):
+    """
+    scope: 'train' | 'val'
+    losses: dict of scalar floats
+    lrs: dict of learning rates
+    times: dict with keys like 'data', 'batch', optional 'iter'
+    """
+    if RANK != 0:
+        return
+    mem = _mem_stats()
+    # Build a compact, aligned message
+    parts = [
+        f"[{scope.upper()}] E{epoch:03d} I{iteration:05d} GS{global_step:07d}",
+        f"bs={batch_size}x{world_size}",
+        f"time(b/d)={times.get('batch', 0):.3f}/{times.get('data', 0):.3f}s",
+        f"mem(a/r/m)={mem['alloc_mb']:.0f}/{mem['reserved_mb']:.0f}/{mem['max_alloc_mb']:.0f}MB",
+    ]
+    try:
+        bt = float(times.get('batch', 0.0))
+        if bt > 0:
+            ips = (batch_size * world_size) / bt
+            parts.append(f"ips={ips:.1f}")
+    except Exception:
+        pass
+    if lrs:
+        lr_str = " ".join([f"{k}={v:.2e}" for k, v in lrs.items()])
+        parts.append(f"lr: {lr_str}")
+    if scaler_g is not None:
+        try:
+            parts.append(f"scale_g={float(scaler_g.get_scale()):.1f}")
+        except Exception:
+            pass
+    if scaler_d is not None:
+        try:
+            parts.append(f"scale_d={float(scaler_d.get_scale()):.1f}")
+        except Exception:
+            pass
+    if losses:
+        loss_str = " ".join([f"{k}={v:.4f}" for k, v in losses.items()])
+        parts.append(f"loss: {loss_str}")
+    print(" | ".join(parts), flush=True)
+
+def log_epoch_summary(epoch, global_step, epoch_avg_losses, val_metrics=None):
+    if RANK != 0:
+        return
+    mem = _mem_stats()
+    print("\n===== Epoch Summary =====", flush=True)
+    print(f"Epoch {epoch} @ global_step {global_step}", flush=True)
+    if epoch_avg_losses:
+        loss_str = ", ".join([f"{k}={v:.4f}" for k, v in epoch_avg_losses.items()])
+        print(f"Train avg: {loss_str}", flush=True)
+    if val_metrics:
+        vstr = ", ".join([f"{k}={v:.4f}" for k, v in val_metrics.items()])
+        print(f"Val: {vstr}", flush=True)
+    print(f"GPU mem: alloc={mem['alloc_mb']:.0f}MB reserved={mem['reserved_mb']:.0f}MB peak={mem['max_alloc_mb']:.0f}MB", flush=True)
+    print("========================\n", flush=True)
 
 def copy_source(file, output_dir):
     shutil.copyfile(file, os.path.join(output_dir, os.path.basename(file)))
@@ -376,6 +452,17 @@ def train_mudiff(rank, gpu, args):
     gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, **ddp_kwargs)
     disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, **ddp_kwargs)
 
+    # One-time model parameter summary
+    if rank == 0:
+        def _count_params(m):
+            p = sum(p.numel() for p in m.parameters())
+            t = sum(p.numel() for p in m.parameters() if p.requires_grad)
+            return p, t
+        p1, t1 = _count_params(gen_diffusive_1)
+        p2, t2 = _count_params(gen_diffusive_2)
+        pd, td = _count_params(disc_diffusive_2)
+        print(f"[MODEL] G1 params: {p1:,} (trainable {t1:,}); G2 params: {p2:,} (trainable {t2:,}); D params: {pd:,} (trainable {td:,})", flush=True)
+
 
     output_path = args.output_path
 
@@ -439,7 +526,16 @@ def train_mudiff(rank, gpu, args):
     for epoch in range(init_epoch, args.num_epoch + 1):
         # train_sampler.set_epoch(epoch)
 
+        # running loss accumulators for epoch summary
+        ep_losses = {
+            'D_total': 0.0, 'D_real': 0.0, 'D_fake': 0.0, 'R1': 0.0,
+            'G_total': 0.0, 'G_adv': 0.0, 'G_L1': 0.0, 'G_mask': 0.0,
+        }
+        ep_count = 0
+        iter_start_time = time.time()
+
         for iteration, (x1, x2, x3, x4) in enumerate(data_loader):
+            data_time = time.time() - iter_start_time
             # ---- D step ----
             # Enable D grads, disable G grads (extra safety even though we use no_grad for G forwards)
             for p in disc_diffusive_2.parameters():
@@ -502,8 +598,8 @@ def train_mudiff(rank, gpu, args):
                 errD_fake2 = errD2_fake2_g1 + errD2_fake2_g2
 
 
-            # Debug prints before D backward (rank 0 only to avoid log spam)
-            if rank == 0:
+            # Optional verbose tensor debug
+            if args.debug_verbose and rank == 0:
                 def _dbg(tag, t):
                     try:
                         print(f"[rank {rank}] {tag}: dev={t.device} req_grad={t.requires_grad} "
@@ -513,10 +609,11 @@ def train_mudiff(rank, gpu, args):
                 _dbg("fake1_D", x2_pos_sample_g1)
                 _dbg("fake2_D", x2_pos_sample_g2)
                 _dbg("target0", x2_t)
-                _dbg("d_total", d_total)
 
             # scaler_d.scale(errD_fake2).backward()
-            d_total = errD_real2 + grad_penalty2 + errD_fake2                
+            d_total = errD_real2 + grad_penalty2 + errD_fake2
+            if args.debug_verbose and rank == 0:
+                print(f"[rank {rank}] d_total={d_total.item():.4f}", flush=True)
             scaler_d.scale(d_total).backward()
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
@@ -583,16 +680,17 @@ def train_mudiff(rank, gpu, args):
                 att_map_g2 = torch.sigmoid(att_conv(att_feat_g2))
                 att_map_g2 = F.interpolate(att_map_g2, size=(H, W), mode='bilinear', align_corners=False)
 
-                def _sh(name, t):
-                    print(f"[rank {rank}] {name}: shape={tuple(t.shape)} "
-                        f"min={t.min().item():.3g} max={t.max().item():.3g}", flush=True)
+                if args.debug_verbose and rank == 0:
+                    def _sh(name, t):
+                        print(f"[rank {rank}] {name}: shape={tuple(t.shape)} "
+                            f"min={t.min().item():.3g} max={t.max().item():.3g}", flush=True)
 
-                _sh("x2_pos_sample_g1", x2_pos_sample_g1)
-                _sh("x2_pos_sample_g2", x2_pos_sample_g2)
-                _sh("att_feat_g1", att_feat_g1)
-                _sh("att_feat_g2", att_feat_g2)
-                _sh("att_map_g1(resized)", att_map_g1)
-                _sh("att_map_g2(resized)", att_map_g2)
+                    _sh("x2_pos_sample_g1", x2_pos_sample_g1)
+                    _sh("x2_pos_sample_g2", x2_pos_sample_g2)
+                    _sh("att_feat_g1", att_feat_g1)
+                    _sh("att_feat_g2", att_feat_g2)
+                    _sh("att_map_g1(resized)", att_map_g1)
+                    _sh("att_map_g2(resized)", att_map_g2)
 
                 # sanity checks before using them
                 assert att_map_g1.shape == x2_pos_sample_g2.shape, \
@@ -617,7 +715,7 @@ def train_mudiff(rank, gpu, args):
                 errG = errG_adv + (args.lambda_l1_loss * errG_L1) + (args.lambda_mask_loss * mask_loss)
 
             # Debug prints before G backward (rank 0 only)
-            if rank == 0:
+            if args.debug_verbose and rank == 0:
                 def _dbg2(tag, t):
                     try:
                         print(f"[rank {rank}] {tag}: dev={t.device} req_grad={t.requires_grad} "
@@ -633,9 +731,33 @@ def train_mudiff(rank, gpu, args):
             scaler_g.update()
 
             global_step += 1
-            if iteration % 100 == 0 and rank == 0:
-                log_cuda('after G update')
-                print('epoch {} iteration{},  G-Adv: {}, G-Sum: {}'.format(epoch, iteration, errG_adv.item(), errG.item()))
+            # accumulate epoch metrics
+            ep_losses['D_total'] += float(d_total.detach().item())
+            ep_losses['D_real']  += float(errD_real2.detach().item())
+            ep_losses['D_fake']  += float(errD_fake2.detach().item())
+            ep_losses['R1']      += float(grad_penalty2.detach().item()) if torch.is_tensor(grad_penalty2) else float(grad_penalty2)
+            ep_losses['G_total'] += float(errG.detach().item())
+            ep_losses['G_adv']   += float(errG_adv.detach().item())
+            ep_losses['G_L1']    += float(errG_L1.detach().item())
+            ep_losses['G_mask']  += float(mask_loss.detach().item())
+            ep_count += 1
+
+            # periodic step logging
+            if args.log_every > 0 and (iteration % args.log_every == 0):
+                batch_time = time.time() - (iter_start_time)
+                log_step(
+                    scope='train', epoch=epoch, iteration=iteration, global_step=global_step,
+                    losses=dict(G=errG.item(), G_adv=errG_adv.item(), G_L1=errG_L1.item(), G_mask=mask_loss.item(),
+                                D=d_total.item(), D_real=errD_real2.item(), D_fake=errD_fake2.item(), R1=float(grad_penalty2.item()) if torch.is_tensor(grad_penalty2) else float(grad_penalty2)),
+                    lrs=dict(lr_g=_lr_of(optimizer_gen_diffusive_1), lr_d=_lr_of(optimizer_disc_diffusive_2)),
+                    times=dict(batch=batch_time, data=data_time),
+                    batch_size=batch_size, world_size=args.world_size,
+                    scaler_g=scaler_g, scaler_d=scaler_d,
+                )
+                if rank == 0 and args.log_mem_after_update:
+                    log_cuda('after G update')
+                # reset timer for next iter
+                iter_start_time = time.time()
 
         if not args.no_lr_decay:
             scheduler_gen_diffusive_1.step()
@@ -701,6 +823,12 @@ def train_mudiff(rank, gpu, args):
                     optimizer_gen_diffusive_1.swap_parameters_with_ema(store_params_in_ema=True)
                     optimizer_gen_diffusive_2.swap_parameters_with_ema(store_params_in_ema=True)
 
+        # epoch summary logging (after stepping schedulers, before validation files saving)
+        avg_losses = {}
+        if ep_count > 0:
+            avg_losses = {k: v / ep_count for k, v in ep_losses.items()}
+            log_epoch_summary(epoch, global_step, avg_losses)
+
         for iteration, (x1_val, x2_val, x3_val, x4_val) in enumerate(data_loader_val):
             cond_data1_val = x1_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             cond_data2_val = x2_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
@@ -724,7 +852,16 @@ def train_mudiff(rank, gpu, args):
 
             val_psnr_values[0, epoch, iteration] = psnr(real_data_val, fake_sample_val, data_range=real_data_val.max())
 
-        print(np.nanmean(val_psnr_values[0, epoch, :]))
+        mean_psnr = float(np.nanmean(val_psnr_values[0, epoch, :]))
+        if rank == 0:
+            log_step(
+                scope='val', epoch=epoch, iteration=0, global_step=global_step,
+                losses={}, lrs={}, times={'batch': 0.0, 'data': 0.0},
+                batch_size=batch_size, world_size=args.world_size,
+            )
+            log_epoch_summary(epoch, global_step, epoch_avg_losses={'train_G': avg_losses.get('G_total', 0.0), 'train_D': avg_losses.get('D_total', 0.0)},
+                              val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch, :]))})
+        print(mean_psnr)
         np.save('{}/val_l1_loss.npy'.format(exp_path), val_l1_loss)
         np.save('{}/val_psnr_values.npy'.format(exp_path), val_psnr_values)
 
@@ -900,6 +1037,14 @@ if __name__ == '__main__':
                         help='Enable gradient checkpointing on generator forwards to save memory')
     parser.add_argument('--use_bf16', action='store_true', default=False,
                         help='Use bfloat16 autocast for reduced memory (default off)')
+
+    # logging controls
+    parser.add_argument('--log_every', type=int, default=100,
+                        help='Log every N iterations (per-rank=0). Set 0 to disable per-iter logs.')
+    parser.add_argument('--log_mem_after_update', action='store_true', default=False,
+                        help='Emit memory line after each logged update.')
+    parser.add_argument('--debug_verbose', action='store_true', default=False,
+                        help='Print verbose tensor shapes/stats for debugging.')
 
     args = parser.parse_args()
     args.world_size = args.num_proc_node * args.num_process_per_node
