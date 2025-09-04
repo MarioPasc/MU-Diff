@@ -48,7 +48,6 @@ except AttributeError:
     if hasattr(torch.backends, "cudnn"):
         torch.backends.cudnn.allow_tf32 = True # type: ignore
 
-# ...existing code...
 
 class BratsDatasetWrapper:
     """
@@ -592,7 +591,7 @@ def train_mudiff(rank, gpu, args):
                     D2_real_r1, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                     # build graph for penalty so it contributes gradients to D (R1 needs create_graph=True)
                     grad2_real = torch.autograd.grad(
-                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True
+                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True, retain_graph=True
                     )[0]
                     grad2_penalty = (grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2).mean()
                     grad_penalty2 = (args.r1_gamma / 2) * grad2_penalty
