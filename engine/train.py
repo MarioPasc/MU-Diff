@@ -353,7 +353,7 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
             t = torch.full((x.size(0),), i, dtype=torch.int64).to(x.device)
             t_time = t
             latent_z = torch.randn(x.size(0), opt.nz, device=x.device)
-            with autocast('cuda', dtype=torch.float16 if not args.use_bf16 else torch.bfloat16):
+            with autocast('cuda', dtype=torch.float16 if not opt.use_bf16 else torch.bfloat16):
                 x_0_1 = generator1(x, cond1, cond2, cond3, t_time, latent_z)
                 x_0_2 = generator2(x, cond1, cond2, cond3, t_time, latent_z, x_0_1[:, [0], :])
                 x_new = sample_posterior_combine(coefficients, x_0_1[:, [0], :], x_0_2[:, [0], :], x, t)
