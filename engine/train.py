@@ -8,6 +8,7 @@ import os
 # os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "1")   # serialized kernels → accurate trace; ONLY FOR DEBUGGING
 os.environ.setdefault("NCCL_DEBUG", "WARN")          # INFO if you want more detail
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # better allocator behavior
+torch.autograd.set_detect_anomaly(True)  # TEMPORARY
 
 
 from backbones.dense_layer import conv2d
@@ -632,6 +633,16 @@ def train_mudiff(rank, gpu, args):
             d_total = errD_real2 + grad_penalty2 + errD_fake2
             if args.debug_verbose and rank == 0:
                 print(f"[rank {rank}] d_total={d_total.item():.4f}", flush=True)
+                
+                
+            if args.debug_verbose and rank == 0:
+                def dbg(n, t):
+                    print(f"[rank {rank}] {n}: dev={t.device} req_grad={t.requires_grad} "
+                        f"is_leaf={getattr(t,'is_leaf','NA')} shape={tuple(t.shape)}", flush=True)
+                dbg("D2_real", D2_real); dbg("D2_real_r1", D2_real_r1)
+                dbg("grad2_real", grad2_real); print(f"[rank {rank}] d_total={float(d_total.detach())}", flush=True)
+
+
             scaler_d.scale(d_total).backward()
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
