@@ -35,16 +35,19 @@ os.environ["CUDA_HOME"] = NVCC_DIR
 os.environ["PATH"] = f"{os.environ['CUDA_HOME']}/bin:{os.environ['PATH']}"
 # os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"   # RTX 4090
 
+import torch
 print("\n=====================================")
 print(" Cuda Setup")
 print("=====================================")
 print(f"Located nvcc dir: {NVCC_DIR}")
 print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
 print(f"CUDA_HOME      : {os.environ.get('CUDA_HOME','(not set)')}")
-print(f"PATH            : {os.environ.get('PATH','(not set)')}")
+print(f"PyTorch version : {torch.__version__}")
+print(f"CUDA version    : {torch.version.cuda}")
 print("nvcc: \n")
 subprocess.run(["nvcc", "--version"])
 subprocess.run(["which", "nvcc"])
+print(f"PATH            : {os.environ.get('PATH','(not set)')}")
 print("\n================================")
 
 # Add these sets to encode boolean flag semantics
