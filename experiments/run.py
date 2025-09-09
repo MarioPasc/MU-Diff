@@ -8,11 +8,18 @@ import platform
 import datetime as _dt
 import json
 from shutil import which
+from pathlib import Path
 
 # ==============================================
 # MU-Diff Enhanced Runner
 # Adds rich session logging + env exports
 # ==============================================
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+os.environ["PYTHONPATH"] = (
+    f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
+    if os.environ.get("PYTHONPATH") else str(REPO_ROOT)
+)
 
 # Add these sets to encode boolean flag semantics
 STORE_TRUE_FLAGS = {
