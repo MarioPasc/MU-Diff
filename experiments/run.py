@@ -21,6 +21,25 @@ os.environ["PYTHONPATH"] = (
     if os.environ.get("PYTHONPATH") else str(REPO_ROOT)
 )
 
+# 1) Locate the pip-installed CUDA 12.1 nvcc dir (works for any Python x.y)
+import inspect, os
+import nvidia.cuda_nvcc as m
+NVCC_DIR=os.path.dirname(inspect.getfile(m))
+
+
+# 2) Use that toolchain
+os.environ["PYTHONPATH"] = (
+    f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
+    if os.environ.get("PYTHONPATH") else str(REPO_ROOT)
+)
+os.environ["CUDA_HOME"] = NVCC_DIR
+os.environ["PATH"] = f"{os.environ['CUDA_HOME']}/bin:{os.environ['PATH']}"
+# os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"   # RTX 4090
+subprocess.run(["which", "nvcc"])
+subprocess.run(["nvcc", "--version"])
+
+
+
 # Add these sets to encode boolean flag semantics
 STORE_TRUE_FLAGS = {
     # train.py
