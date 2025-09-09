@@ -57,20 +57,17 @@ os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")  # RTX 4090
 
 def _nvcc_version_str() -> str:
     try:
-        out = subprocess.check_output([nvcc_path, "--version"], text=True)
+        out = subprocess.check_output([nvcc_path, "--version"], text=True) # type: ignore
     except Exception:
         out = "(nvcc --version failed)"
     return out
 
-import torch
 print("\n=====================================")
 print(" Cuda Setup")
 print("=====================================")
 print(f"nvcc path       : {nvcc_path}")
 print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
 print(f"CUDA_HOME       : {os.environ.get('CUDA_HOME','(not set)')}")
-print(f"PyTorch version : {torch.__version__}")
-print(f"CUDA version    : {torch.version.cuda}")
 print("nvcc --version:\n")
 print(_nvcc_version_str())
 print("which nvcc:\n")
