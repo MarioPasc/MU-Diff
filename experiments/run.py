@@ -168,6 +168,7 @@ Examples:
     print(f"Working Dir     : {os.getcwd()}")
     print(f"Python Exec     : {sys.executable}")
     print(f"Python Version  : {platform.python_version()}")
+    print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
     print(f"Platform        : {platform.platform()}")
     print(f"Interpreter Args: {' '.join(sys.argv)}")
     git = _git_info()
