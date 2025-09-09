@@ -8,7 +8,7 @@ import os
 # os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "1")   # serialized kernels → accurate trace; ONLY FOR DEBUGGING
 os.environ.setdefault("NCCL_DEBUG", "WARN")          # INFO if you want more detail
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # better allocator behavior
-torch.autograd.set_detect_anomaly(True)  # TEMPORARY
+torch.autograd.set_detect_anomaly(False)  # TEMPORARY
 
 
 from backbones.dense_layer import conv2d
