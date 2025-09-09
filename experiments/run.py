@@ -9,47 +9,74 @@ import datetime as _dt
 import json
 from shutil import which
 from pathlib import Path
-
+from typing import Optional, Union
 # ==============================================
 # MU-Diff Enhanced Runner
 # Adds rich session logging + env exports
 # ==============================================
 
+from pathlib import Path
+import os, shutil, subprocess, sys
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-os.environ["PYTHONPATH"] = (
-    f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
-    if os.environ.get("PYTHONPATH") else str(REPO_ROOT)
-)
+os.environ["PYTHONPATH"] = (f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
+                           if os.environ.get("PYTHONPATH") else str(REPO_ROOT))
 
-# 1) Locate the pip-installed CUDA 12.1 nvcc dir (works for any Python x.y)
-import inspect, os
-import nvidia.cuda_nvcc as m
-NVCC_DIR=os.path.dirname(inspect.getfile(m))
+def _is_exec(p: Union[int, Union[str, bytes, os.PathLike[str], os.PathLike[bytes]], Optional[str]]) -> bool:
+    return bool(p) and os.path.isfile(p) and os.access(p, os.X_OK) # type: ignore
 
-# 2) Use that toolchain
-os.environ["PYTHONPATH"] = (
-    f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
-    if os.environ.get("PYTHONPATH") else str(REPO_ROOT)
-)
-os.environ["CUDA_HOME"] = NVCC_DIR
-os.environ["PATH"] = f"{os.environ['CUDA_HOME']}/bin:{os.environ['PATH']}"
-# os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"   # RTX 4090
+def discover_nvcc() -> Optional[str]:
+    # Highest priority: explicit vars
+    cand = [
+        os.path.join(os.environ.get("CONDA_PREFIX",""), "bin", "nvcc"),
+        os.environ.get("CUDACXX"),
+        os.path.join(os.environ.get("CUDA_HOME",""), "bin", "nvcc"),
+        shutil.which("nvcc"),
+    ]
+    for p in cand:
+        if _is_exec(p):
+            return p
+    return ""
+
+nvcc_path = discover_nvcc()
+if not nvcc_path:
+    sys.stderr.write(
+        "[FATAL] nvcc not found. Install a CUDA toolkit inside this env, e.g.:\n"
+        "        conda install -c nvidia cuda-toolkit=12.1\n"
+    )
+    sys.exit(1)
+
+# Derive CUDA_HOME and ensure PATH/LD_LIBRARY_PATH are set
+CUDA_HOME = str(Path(nvcc_path).parents[1])  # .../cuda-12.x
+os.environ["CUDA_HOME"] = CUDA_HOME
+os.environ["PATH"] = f"{Path(CUDA_HOME,'bin')}:{os.environ.get('PATH','')}"
+ld = f"{Path(CUDA_HOME,'lib')}:{Path(CUDA_HOME,'lib64')}"
+os.environ["LD_LIBRARY_PATH"] = f"{ld}:{os.environ.get('LD_LIBRARY_PATH','')}"
+os.environ.setdefault("CUDACXX", nvcc_path)
+os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")  # RTX 4090
+
+def _nvcc_version_str() -> str:
+    try:
+        out = subprocess.check_output([nvcc_path, "--version"], text=True)
+    except Exception:
+        out = "(nvcc --version failed)"
+    return out
 
 import torch
 print("\n=====================================")
 print(" Cuda Setup")
 print("=====================================")
-print(f"Located nvcc dir: {NVCC_DIR}")
+print(f"nvcc path       : {nvcc_path}")
 print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
-print(f"CUDA_HOME      : {os.environ.get('CUDA_HOME','(not set)')}")
+print(f"CUDA_HOME       : {os.environ.get('CUDA_HOME','(not set)')}")
 print(f"PyTorch version : {torch.__version__}")
 print(f"CUDA version    : {torch.version.cuda}")
-print("nvcc: \n")
-subprocess.run(["nvcc", "--version"])
-subprocess.run(["which", "nvcc"])
+print("nvcc --version:\n")
+print(_nvcc_version_str())
+print("which nvcc:\n")
+print(shutil.which("nvcc") or "(not found in PATH)")
 print(f"PATH            : {os.environ.get('PATH','(not set)')}")
 print("\n================================")
-
 # Add these sets to encode boolean flag semantics
 STORE_TRUE_FLAGS = {
     # train.py
