@@ -26,7 +26,6 @@ import inspect, os
 import nvidia.cuda_nvcc as m
 NVCC_DIR=os.path.dirname(inspect.getfile(m))
 
-
 # 2) Use that toolchain
 os.environ["PYTHONPATH"] = (
     f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
@@ -35,10 +34,17 @@ os.environ["PYTHONPATH"] = (
 os.environ["CUDA_HOME"] = NVCC_DIR
 os.environ["PATH"] = f"{os.environ['CUDA_HOME']}/bin:{os.environ['PATH']}"
 # os.environ["TORCH_CUDA_ARCH_LIST"] = "8.9"   # RTX 4090
-subprocess.run(["which", "nvcc"])
+
+print("===== Environment Setup =====")
+print(f"Located nvcc dir: {NVCC_DIR}")
+print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
+print(f"CUDA_HOME      : {os.environ.get('CUDA_HOME','(not set)')}")
+print(f"PATH            : {os.environ.get('PATH','(not set)')}")
+print(f"NVCC Version    : ", end="")
 subprocess.run(["nvcc", "--version"])
-
-
+print(f" Whereis NVCC   : ", end="")
+subprocess.run(["which", "nvcc"])
+print("================================")
 
 # Add these sets to encode boolean flag semantics
 STORE_TRUE_FLAGS = {
@@ -187,7 +193,6 @@ Examples:
     print(f"Working Dir     : {os.getcwd()}")
     print(f"Python Exec     : {sys.executable}")
     print(f"Python Version  : {platform.python_version()}")
-    print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
     print(f"Platform        : {platform.platform()}")
     print(f"Interpreter Args: {' '.join(sys.argv)}")
     git = _git_info()
