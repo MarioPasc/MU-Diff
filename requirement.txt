@@ -1,10 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+
 numpy
-torch
-torchvision
+torch==2.4.1
+torchvision==0.19.1
 nibabel
 Pillow
 scikit-image
-pyyaml
+PyYAML
 lpips
 types-PyYAML
 ninja
+nvidia-cuda-nvcc-cu12==12.1.105
