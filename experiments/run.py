@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 os.environ["PYTHONPATH"] = (f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
                            if os.environ.get("PYTHONPATH") else str(REPO_ROOT))
 
-def _is_exec(p: Union[int, Union[str, bytes, os.PathLike[str], os.PathLike[bytes]], Optional[str]]) -> bool:
+def _is_exec(p: Optional[str]) -> bool:
     return bool(p) and os.path.isfile(p) and os.access(p, os.X_OK) # type: ignore
 
 def discover_nvcc() -> Optional[str]:
