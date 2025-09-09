@@ -395,21 +395,40 @@ def train_mudiff(rank, gpu, args):
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset,
                                                                     num_replicas=args.world_size,
                                                                     rank=rank)
+    
+    tw = int(os.environ.get("MU_TRAIN_WORKERS", "8"))
+    vw = int(os.environ.get("MU_VAL_WORKERS",   "4"))
+    prefetch = int(os.environ.get("MU_PREFETCH", "2"))
+    persistent = bool(int(os.environ.get("MU_PERSISTENT", "0"))) and tw > 0
+    timeout_s = int(os.environ.get("MU_DL_TIMEOUT", "600"))
+    
     data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=False,
-        num_workers=8, pin_memory=True, persistent_workers=True,
-        prefetch_factor=4, sampler=train_sampler, drop_last=True)
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=tw,
+        pin_memory=True,
+        persistent_workers=persistent,
+        prefetch_factor=prefetch if tw > 0 else None,
+        sampler=train_sampler,
+        drop_last=True,
+        timeout=timeout_s if tw > 0 else 0,
+    )
+
 
     val_sampler = torch.utils.data.distributed.DistributedSampler(dataset_val,
                                                                   num_replicas=args.world_size,
                                                                   rank=rank)
-    data_loader_val = torch.utils.data.DataLoader(dataset_val,
-                                                  batch_size=batch_size,
-                                                  shuffle=False,
-                                                  num_workers=4,
-                                                  pin_memory=True,
-                                                  sampler=val_sampler,
-                                                  drop_last=True)
+    data_loader_val = torch.utils.data.DataLoader(
+        dataset_val,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=vw,
+        pin_memory=True,
+        sampler=val_sampler,
+        drop_last=True,
+        timeout=timeout_s if vw > 0 else 0,
+    )
 
     val_l1_loss = np.zeros([2, args.num_epoch, len(data_loader_val)])
     val_psnr_values = np.zeros([2, args.num_epoch, len(data_loader_val)])
