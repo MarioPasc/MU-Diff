@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision  # type: ignore
+from utils.train_utils import epoch_visual_report
 from dataset.dataset_brats import BratsDataset
 
 from torch.multiprocessing import Process
@@ -587,6 +588,7 @@ def train_mudiff(rank, gpu, args):
         return gen_diffusive_2(x, c1, c2, c3, t, z, prev)
 
     for epoch in range(init_epoch, args.num_epoch + 1):
+        epoch_start_time = time.time()
         train_sampler.set_epoch(epoch)
 
         # running loss accumulators for epoch summary
@@ -855,9 +857,12 @@ def train_mudiff(rank, gpu, args):
                                             cond_data3,
                                             args.num_timesteps, x2_t, T, args)
 
-            fake_sample = torch.cat((real_data, fake_sample), axis=-1)
+            # keep originals for reporting
+            last_real_for_report = real_data.detach().clone()
+            last_fake_for_report = fake_sample.detach().clone()
 
-            torchvision.utils.save_image(fake_sample,
+            preview = torch.cat((real_data, fake_sample), axis=-1)
+            torchvision.utils.save_image(preview,
                                          os.path.join(exp_path, 'sample_discrete_epoch_{}.png'.format(epoch)),
                                          normalize=True)
 
@@ -934,6 +939,23 @@ def train_mudiff(rank, gpu, args):
             )
             log_epoch_summary(epoch, global_step, epoch_avg_losses={'train_G': avg_losses.get('G_total', 0.0), 'train_D': avg_losses.get('D_total', 0.0)},
                               val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch, :]))})
+            # Enhanced epoch report
+            try:
+                epoch_time = time.time() - epoch_start_time
+                peak_mem = torch.cuda.max_memory_allocated() / 1024**2 if torch.cuda.is_available() else 0.0
+                epoch_visual_report(
+                    out_dir=exp_path,
+                    epoch=epoch,
+                    real_batch=last_real_for_report if 'last_real_for_report' in locals() else real_data,
+                    fake_batch=last_fake_for_report if 'last_fake_for_report' in locals() else fake_sample,
+                    avg_losses=avg_losses,
+                    val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch, :]))},
+                    epoch_time_sec=epoch_time,
+                    peak_mem_mb=peak_mem,
+                    extra={'global_step': global_step}
+                )
+            except Exception as e:
+                print(f"[REPORT] Epoch report failed: {e}")
         print(mean_psnr)
         np.save('{}/val_l1_loss.npy'.format(exp_path), val_l1_loss)
         np.save('{}/val_psnr_values.npy'.format(exp_path), val_psnr_values)
