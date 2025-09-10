@@ -233,9 +233,8 @@ class Diffusion_Coefficients():
         self.sigmas, self.a_s, _ = get_sigma_schedule(args, device=device)
         self.a_s_prev = self.a_s.clone()
         self.a_s_prev[-1] = 1
-        self.a_s_cum = torch.cumprod(self.a_s, dim=0).to(device)               
-        self.sigmas_cum = torch.sqrt(1.0 - self.a_s_cum ** 2).to(device)        
-        
+        self.a_s_cum = torch.cumprod(self.a_s, dim=0).to(device)
+        self.sigmas_cum = torch.sqrt(1.0 - self.a_s_cum ** 2).to(device)
         self.a_s_prev = self.a_s_prev.to(device)
 
 
@@ -553,6 +552,32 @@ def train_mudiff(rank, gpu, args):
               .format(checkpoint['epoch']))
     else:
         global_step, epoch, init_epoch = 0, 0, 0
+        if args.pretrained_dir:
+            if rank == 0:
+                print(f"[PRETRAIN] Loading generators from {args.pretrained_dir}")
+            def _load_pre(model_ddp, filename):
+                path = os.path.join(args.pretrained_dir, filename)
+                if not os.path.isfile(path):
+                    if rank == 0:
+                        print(f"[PRETRAIN] File not found: {path}")
+                    return
+                try:
+                    result = model_ddp.load_state_dict(torch.load(path, map_location=device), strict=False)
+                    missing = getattr(result, 'missing_keys', None) or (result[0] if isinstance(result, (list, tuple)) else [])
+                    unexpected = getattr(result, 'unexpected_keys', None) or (result[1] if isinstance(result, (list, tuple)) else [])
+                    if rank == 0:
+                        print(f"[PRETRAIN] {filename} loaded (missing={len(missing)} unexpected={len(unexpected)})")
+                        if missing:
+                            print(f"           Missing sample: {missing[:8]}{' ...' if len(missing)>8 else ''}")
+                        if unexpected:
+                            print(f"           Unexpected sample: {unexpected[:8]}{' ...' if len(unexpected)>8 else ''}")
+                except Exception as e:
+                    if rank == 0:
+                        print(f"[PRETRAIN] Error loading {filename}: {e}")
+            _load_pre(gen_diffusive_1, 'gen_diffusive_1.pth')
+            _load_pre(gen_diffusive_2, 'gen_diffusive_2.pth')
+            if rank == 0:
+                print('[PRETRAIN] Pretrained initialization done.')
 
     # Helpers for optional checkpointing of generator forwards
     def run_g1(x, c1, c2, c3, t, z):
@@ -1059,6 +1084,8 @@ if __name__ == '__main__':
                         help='weightening of l1 loss part of diffusion ans cycle models')
     parser.add_argument('--lambda_adv', type=float, default=1.0,
                         help='weighting of adversarial loss for generators')
+    parser.add_argument('--pretrained_dir', type=str, default=None,
+                        help='Directory with gen_diffusive_1.pth and gen_diffusive_2.pth to initialize generators (ignored if --resume).')
 
     ###ddp
     parser.add_argument('--num_proc_node', type=int, default=1,

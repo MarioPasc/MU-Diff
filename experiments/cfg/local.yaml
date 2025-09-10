@@ -6,6 +6,8 @@ experiments:
   - exp_name: "synthesize_T1CE"
     target: "T1CE"
     train_args:
+
+      pretrained_dir: null
       # Basic settings
       seed: 1024
       resume: false

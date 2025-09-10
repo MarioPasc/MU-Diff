@@ -285,6 +285,20 @@ Examples:
         train_args.setdefault("target_modality", target_mod)
         test_args.setdefault("target_modality", target_mod)
 
+    # Optional pretrained directory: if provided in YAML (train_args.pretrained_dir) normalize path
+    # Users can set either an absolute path or a path relative to the YAML file location.
+    if 'pretrained_dir' in train_args:
+        pd = train_args.get('pretrained_dir')
+        if isinstance(pd, str) and pd:
+            if not os.path.isabs(pd):
+                # Resolve relative to the directory containing the YAML config
+                yaml_dir = os.path.dirname(os.path.abspath(args.config))
+                resolved = os.path.normpath(os.path.join(yaml_dir, pd))
+                train_args['pretrained_dir'] = resolved
+            # Verify existence (non-fatal warning if missing)
+            if not os.path.isdir(train_args['pretrained_dir']):
+                print(f"[WARN] pretrained_dir does not exist: {train_args['pretrained_dir']}")
+
     # Run training if not test-only
     if not args.test_only:
         print("\nPreparing training phase...")
