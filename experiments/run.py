@@ -25,45 +25,52 @@ os.environ["PYTHONPATH"] = (f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
 if len([k for k in os.environ.keys() if k.startswith("SLURM_")]) > 0:
     print("[ENV] SLURM environment detected.")
 
-    def _has_cuda_headers(cuda_root: Path) -> bool:
-        return (cuda_root / "include" / "cuda_runtime.h").exists()
+    def _detect_cuda_home():
+        # 1) Honor existing CUDA_HOME if it has headers
+        env_home = os.environ.get("CUDA_HOME")
+        if env_home:
+            if (Path(env_home)/"include"/"cuda_runtime.h").exists() \
+            or (Path(env_home)/"targets/x86_64-linux/include/cuda_runtime.h").exists():
+                return env_home
 
-    def discover_nvcc():
-        # If user provided a valid CUDA_HOME, prefer it.
-        cuda_home = os.environ.get("CUDA_HOME")
-        if cuda_home and _has_cuda_headers(Path(cuda_home)):
-            p = Path(cuda_home) / "bin" / "nvcc"
-            if p.exists(): 
-                return p
-        # Otherwise try common locations, but only accept ones whose parent has headers.
-        search = []
-        for envkey in ("CUDACXX",):
-            if os.environ.get(envkey):
-                search.append(Path(os.environ[envkey]))
-        for envkey in ("CUDA_HOME","CONDA_PREFIX"):
-            if os.environ.get(envkey):
-                search.append(Path(os.environ[envkey]) / "bin" / "nvcc")
-        nvcc_path = shutil.which("nvcc")
-        if nvcc_path:
-            search.append(Path(nvcc_path))
-        for cand in search:
-            if cand.exists():
-                root = cand.parent.parent
-                if _has_cuda_headers(root):
-                    return cand
+        # 2) Try nvcc
+        nvcc = shutil.which("nvcc")
+        if nvcc:
+            cand = Path(nvcc).resolve().parent.parent  # .../bin -> toolkit root
+            if (cand/"include"/"cuda_runtime.h").exists() \
+            or (cand/"targets/x86_64-linux/include/cuda_runtime.h").exists():
+                return str(cand)
+
+        # 3) Try conda prefix
+        cp = os.environ.get("CONDA_PREFIX")
+        if cp:
+            cand = Path(cp)
+            if (cand/"targets/x86_64-linux/include/cuda_runtime.h").exists():
+                return str(cand)
+
         return None
 
-    nvcc = discover_nvcc()
-    if nvcc:
-        cuda_root = nvcc.parent.parent
-        # Do not overwrite a valid CUDA_HOME
-        if not _has_cuda_headers(Path(os.environ.get("CUDA_HOME",""))):
-            os.environ["CUDA_HOME"] = str(cuda_root)
-        os.environ["PATH"] = f"{cuda_root / 'bin'}:{os.environ.get('PATH','')}"
-        os.environ["LD_LIBRARY_PATH"] = f"{cuda_root / 'lib64'}:{os.environ.get('LD_LIBRARY_PATH','')}"
-    else:
-        print("[WARNING] nvcc not found or headers missing; CUDA extensions will fail to build.")
-    os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")  # A100 default
+    CUDA_HOME = _detect_cuda_home()
+    if not CUDA_HOME:
+        raise RuntimeError("cuda_runtime.h not found. Install conda-forge::cuda-toolkit and set CUDA_HOME.")
+
+    # Build proper include/lib search paths for both layouts
+    cand_includes = [
+        f"{CUDA_HOME}/include",
+        f"{CUDA_HOME}/targets/x86_64-linux/include",   # conda-forge layout
+    ]
+    cand_libs = [
+        f"{CUDA_HOME}/lib64",
+        f"{CUDA_HOME}/targets/x86_64-linux/lib",       # conda-forge layout
+    ]
+
+    os.environ["CUDA_HOME"] = CUDA_HOME
+    os.environ["CPATH"] = ":".join([p for p in cand_includes if Path(p).exists()] + [os.environ.get("CPATH","")])
+    os.environ["LIBRARY_PATH"] = ":".join([p for p in cand_libs if Path(p).exists()] + [os.environ.get("LIBRARY_PATH","")])
+    os.environ["LD_LIBRARY_PATH"] = ":".join([p for p in cand_libs if Path(p).exists()] + [os.environ.get("LD_LIBRARY_PATH","")])
+
+    # Optional: set arch list only if not provided. A100 -> 8.0
+    os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")
 else:
     print("[ENV] No SLURM environment detected; assuming ICAI-like cluster with module system.")
     # Non-SLURM environment: assume ICAI cluster with module system
