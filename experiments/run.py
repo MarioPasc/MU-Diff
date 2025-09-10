@@ -22,38 +22,83 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 os.environ["PYTHONPATH"] = (f"{REPO_ROOT}:{os.environ.get('PYTHONPATH','')}"
                            if os.environ.get("PYTHONPATH") else str(REPO_ROOT))
 
-def _is_exec(p: Optional[str]) -> bool:
-    return bool(p) and os.path.isfile(p) and os.access(p, os.X_OK) # type: ignore
+if len([k for k in os.environ.keys() if k.startswith("SLURM_")]) > 0:
+    print("[ENV] SLURM environment detected.")
 
-def discover_nvcc() -> Optional[str]:
-    # Highest priority: explicit vars
-    cand = [
-        os.path.join(os.environ.get("CONDA_PREFIX",""), "bin", "nvcc"),
-        os.environ.get("CUDACXX"),
-        os.path.join(os.environ.get("CUDA_HOME",""), "bin", "nvcc"),
-        shutil.which("nvcc"),
-    ]
-    for p in cand:
-        if _is_exec(p):
-            return p
-    return ""
+    def _has_cuda_headers(cuda_root: Path) -> bool:
+        return (cuda_root / "include" / "cuda_runtime.h").exists()
 
-nvcc_path = discover_nvcc()
-if not nvcc_path:
-    sys.stderr.write(
-        "[FATAL] nvcc not found. Install a CUDA toolkit inside this env, e.g.:\n"
-        "        conda install -c nvidia cuda-toolkit=12.1\n"
-    )
-    sys.exit(1)
+    def discover_nvcc():
+        # If user provided a valid CUDA_HOME, prefer it.
+        cuda_home = os.environ.get("CUDA_HOME")
+        if cuda_home and _has_cuda_headers(Path(cuda_home)):
+            p = Path(cuda_home) / "bin" / "nvcc"
+            if p.exists(): 
+                return p
+        # Otherwise try common locations, but only accept ones whose parent has headers.
+        search = []
+        for envkey in ("CUDACXX",):
+            if os.environ.get(envkey):
+                search.append(Path(os.environ[envkey]))
+        for envkey in ("CUDA_HOME","CONDA_PREFIX"):
+            if os.environ.get(envkey):
+                search.append(Path(os.environ[envkey]) / "bin" / "nvcc")
+        nvcc_path = shutil.which("nvcc")
+        if nvcc_path:
+            search.append(Path(nvcc_path))
+        for cand in search:
+            if cand.exists():
+                root = cand.parent.parent
+                if _has_cuda_headers(root):
+                    return cand
+        return None
 
-# Derive CUDA_HOME and ensure PATH/LD_LIBRARY_PATH are set
-CUDA_HOME = str(Path(nvcc_path).parents[1])  # .../cuda-12.x
-os.environ["CUDA_HOME"] = CUDA_HOME
-os.environ["PATH"] = f"{Path(CUDA_HOME,'bin')}:{os.environ.get('PATH','')}"
-ld = f"{Path(CUDA_HOME,'lib')}:{Path(CUDA_HOME,'lib64')}"
-os.environ["LD_LIBRARY_PATH"] = f"{ld}:{os.environ.get('LD_LIBRARY_PATH','')}"
-os.environ.setdefault("CUDACXX", nvcc_path)
-os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")  # RTX 4090
+    nvcc = discover_nvcc()
+    if nvcc:
+        cuda_root = nvcc.parent.parent
+        # Do not overwrite a valid CUDA_HOME
+        if not _has_cuda_headers(Path(os.environ.get("CUDA_HOME",""))):
+            os.environ["CUDA_HOME"] = str(cuda_root)
+        os.environ["PATH"] = f"{cuda_root / 'bin'}:{os.environ.get('PATH','')}"
+        os.environ["LD_LIBRARY_PATH"] = f"{cuda_root / 'lib64'}:{os.environ.get('LD_LIBRARY_PATH','')}"
+    else:
+        print("[WARNING] nvcc not found or headers missing; CUDA extensions will fail to build.")
+    os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")  # A100 default
+else:
+    print("[ENV] No SLURM environment detected; assuming ICAI-like cluster with module system.")
+    # Non-SLURM environment: assume ICAI cluster with module system
+    def _is_exec(p: Optional[str]) -> bool:
+        return bool(p) and os.path.isfile(p) and os.access(p, os.X_OK) # type: ignore
+
+    def discover_nvcc_icai():
+        cand = [
+            os.path.join(os.environ.get("CONDA_PREFIX",""), "bin", "nvcc"),
+            os.environ.get("CUDACXX"),
+            os.path.join(os.environ.get("CUDA_HOME",""), "bin", "nvcc"),
+            shutil.which("nvcc"),
+        ]
+        for p in cand:
+            if _is_exec(p):
+                return p
+        return ""
+
+    # Derive CUDA_HOME and ensure PATH/LD_LIBRARY_PATH are set
+    nvcc = discover_nvcc_icai()
+    
+    if not nvcc:
+        sys.stderr.write(
+            "[FATAL] nvcc not found. Install a CUDA toolkit inside this env, e.g.:\n"
+            "        conda install -c nvidia cuda-toolkit=12.1\n"
+        )
+        sys.exit(1)
+
+    CUDA_HOME = str(Path(nvcc).parents[1])  # .../cuda-12.x
+    os.environ["CUDA_HOME"] = CUDA_HOME
+    os.environ["PATH"] = f"{Path(CUDA_HOME,'bin')}:{os.environ.get('PATH','')}"
+    ld = f"{Path(CUDA_HOME,'lib')}:{Path(CUDA_HOME,'lib64')}"
+    os.environ["LD_LIBRARY_PATH"] = f"{ld}:{os.environ.get('LD_LIBRARY_PATH','')}"
+    os.environ.setdefault("CUDACXX", nvcc)
+    os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.9")  # RTX 4090
 
 def _nvcc_version_str() -> str:
     try:
@@ -65,7 +110,7 @@ def _nvcc_version_str() -> str:
 print("\n=====================================")
 print(" Cuda Setup")
 print("=====================================")
-print(f"nvcc path       : {nvcc_path}")
+print(f"nvcc path       : {nvcc}")
 print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
 print(f"CUDA_HOME       : {os.environ.get('CUDA_HOME','(not set)')}")
 print("nvcc --version:\n")

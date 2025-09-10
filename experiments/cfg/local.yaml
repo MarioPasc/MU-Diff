@@ -1,17 +1,15 @@
 dataset: BraTS_MEN  
-data_path: /mnt/home/users/tic_163_uma/mpascual/fscratch/datasets/meningiomas/diffusion_brats  
-output_root: /mnt/home/users/tic_163_uma/mpascual/fscratch/results 
+data_path: /media/hddb/mario/data/meningiomas/diffusion  
+output_root: /home/mariopascual/projects/meningiomas/results 
 
 experiments:
   - exp_name: "synthesize_T1CE"
     target: "T1CE"
     train_args:
-
-      pretrained_dir: null
       # Basic settings
       seed: 1024
       resume: false
-      
+      pretrained_dir: /media/hddb/mario/data/meningiomas/pretrained_weights_mudiff/t1ce
       # Data and image settings
       image_size: 256
       num_channels: 1
@@ -138,7 +136,8 @@ experiments:
       # Basic settings
       seed: 1024
       resume: false
-      
+      pretrained_dir: /media/hddb/mario/data/meningiomas/pretrained_weights_mudiff/flair
+            
       # Data and image settings
       image_size: 256
       num_channels: 1
@@ -265,7 +264,7 @@ experiments:
       # Basic settings
       seed: 1024
       resume: false
-      
+      pretrained_dir: /media/hddb/mario/data/meningiomas/pretrained_weights_mudiff/t2
       # Data and image settings
       image_size: 256
       num_channels: 1
@@ -392,7 +391,7 @@ experiments:
       # Basic settings
       seed: 1024
       resume: false
-      
+      pretrained_dir: /media/hddb/mario/data/meningiomas/pretrained_weights_mudiff/t1
       # Data and image settings
       image_size: 256
       num_channels: 1
