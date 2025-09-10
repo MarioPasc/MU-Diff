@@ -117,7 +117,6 @@ def _nvcc_version_str() -> str:
 print("\n=====================================")
 print(" Cuda Setup")
 print("=====================================")
-print(f"nvcc path       : {nvcc}")
 print(f"PythonPATH      : {os.environ.get('PYTHONPATH','(not set)')}")
 print(f"CUDA_HOME       : {os.environ.get('CUDA_HOME','(not set)')}")
 print("nvcc --version:\n")
