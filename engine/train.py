@@ -431,8 +431,8 @@ def train_mudiff(rank, gpu, args):
         timeout=timeout_s if vw > 0 else 0,
     )
 
-    val_l1_loss = np.zeros([2, args.num_epoch, len(data_loader_val)])
-    val_psnr_values = np.zeros([2, args.num_epoch, len(data_loader_val)])
+    val_l1_loss = np.zeros([2, args.num_epoch + 1, len(data_loader_val)])
+    val_psnr_values = np.zeros([2, args.num_epoch + 1, len(data_loader_val)])
     print('train data size:' + str(len(data_loader)))
     print('val data size:' + str(len(data_loader_val)))
     print('target modality:' + str(args.target_modality))
@@ -588,7 +588,7 @@ def train_mudiff(rank, gpu, args):
     def run_g2(x, c1, c2, c3, t, z, prev):
         return gen_diffusive_2(x, c1, c2, c3, t, z, prev)
 
-    for epoch in range(init_epoch, args.num_epoch + 1):
+    for epoch in range(init_epoch, args.num_epoch):
         epoch_start_time = time.time()
         train_sampler.set_epoch(epoch)
 
@@ -914,7 +914,7 @@ def train_mudiff(rank, gpu, args):
             cond_data3_val = x3_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             real_data_val = x4_val.to(device, non_blocking=True).to(memory_format=torch.channels_last)
 
-            x_t = torch.randn_like(real_data)
+            x_t = torch.randn_like(real_data_val)
 
             fake_sample_val = sample_from_model(pos_coeff, gen_diffusive_1, cond_data1_val, gen_diffusive_2,
                                                 cond_data2_val,
@@ -927,11 +927,16 @@ def train_mudiff(rank, gpu, args):
 
             fake_sample_val = fake_sample_val.cpu().numpy()
             real_data_val = real_data_val.cpu().numpy()
-            val_l1_loss[0, epoch, iteration] = abs(fake_sample_val - real_data_val).mean()
+            
+            epoch_slot = epoch - init_epoch
 
-            val_psnr_values[0, epoch, iteration] = psnr(real_data_val, fake_sample_val, data_range=real_data_val.max())
-
-        mean_psnr = float(np.nanmean(val_psnr_values[0, epoch, :]))
+            val_l1_loss[0, epoch_slot, iteration] = abs(fake_sample_val - real_data_val).mean()
+            eps = 1e-8
+            fake = to_range_0_1(fake_sample_val); fake = fake / (fake.mean() + eps)
+            real = to_range_0_1(real_data_val);    real = real / (real.mean() + eps)
+            val_psnr_values[0, epoch_slot, iteration] = psnr(real, fake, data_range=max(real.max(), eps))
+        
+        mean_psnr = float(np.nanmean(val_psnr_values[0, epoch_slot, :]))
         if rank == 0:
             log_step(
                 scope='val', epoch=epoch, iteration=0, global_step=global_step,
@@ -939,7 +944,7 @@ def train_mudiff(rank, gpu, args):
                 batch_size=batch_size, world_size=args.world_size,
             )
             log_epoch_summary(epoch, global_step, epoch_avg_losses={'train_G': avg_losses.get('G_total', 0.0), 'train_D': avg_losses.get('D_total', 0.0)},
-                              val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch, :]))})
+                              val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch_slot, :]))})
             # Enhanced epoch report
             try:
                 epoch_time = time.time() - epoch_start_time
@@ -950,16 +955,17 @@ def train_mudiff(rank, gpu, args):
                     real_batch=last_real_for_report if 'last_real_for_report' in locals() else real_data,
                     fake_batch=last_fake_for_report if 'last_fake_for_report' in locals() else fake_sample,
                     avg_losses=avg_losses,
-                    val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch, :]))},
+                    val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch_slot, :]))},
                     epoch_time_sec=epoch_time,
                     peak_mem_mb=peak_mem,
                     extra={'global_step': global_step}
                 )
             except Exception as e:
                 print(f"[REPORT] Epoch report failed: {e}")
-        print(mean_psnr)
-        np.save('{}/val_l1_loss.npy'.format(exp_path), val_l1_loss)
-        np.save('{}/val_psnr_values.npy'.format(exp_path), val_psnr_values)
+            if rank == 0:
+                print(mean_psnr)
+                np.save(f'{exp_path}/val_l1_loss.npy', val_l1_loss)
+                np.save(f'{exp_path}/val_psnr_values.npy', val_psnr_values)
 
 
 def init_processes(rank, size, fn, args):
