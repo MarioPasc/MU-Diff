@@ -10,7 +10,7 @@ os.environ.setdefault("NCCL_DEBUG", "WARN")          # INFO if you want more det
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # better allocator behavior
 torch.autograd.set_detect_anomaly(False)  # TEMPORARY
 
-RETAIN_GRAPH: bool = False  # whether to retain graph in D step for debugging only; should be False for normal training
+RETAIN_GRAPH: bool = True  # whether to retain graph in D step for debugging only; should be False for normal training
 
 from backbones.dense_layer import conv2d
 
