@@ -1,4 +1,5 @@
 import os
+import logging
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import argparse
@@ -206,6 +207,26 @@ def load_checkpoint(checkpoint_dir, netG, name_of_network, device='cuda:0'):
     netG.eval()
 
 
+def load_checkpoint_with_fallback(output_dir, exp, netG, name_of_network, device='cuda:0'):
+    """Attempt to load checkpoint first from output_dir, then from output_dir/exp.
+    The format expected is pattern '{}.pth' where name_of_network fills the placeholder.
+    """
+    primary_pattern = os.path.join(output_dir, "{}.pth")
+    primary_file = primary_pattern.format(name_of_network)
+    if os.path.isfile(primary_file):
+        logging.info("Loading checkpoint (primary) %s", primary_file)
+        return load_checkpoint(primary_pattern, netG, name_of_network, device=device)
+
+    secondary_pattern = os.path.join(output_dir, exp, "{}.pth")
+    secondary_file = secondary_pattern.format(name_of_network)
+    if os.path.isfile(secondary_file):
+        logging.info("Primary checkpoint missing. Loading checkpoint (secondary) %s", secondary_file)
+        return load_checkpoint(secondary_pattern, netG, name_of_network, device=device)
+
+    logging.error("Checkpoint not found for %s. Tried: %s and %s", name_of_network, primary_file, secondary_file)
+    raise FileNotFoundError(f"Checkpoint not found for {name_of_network} in '{primary_file}' or '{secondary_file}'")
+
+
 def normalize(image):
     """Basic min max scaler.
     """
@@ -217,6 +238,25 @@ def normalize(image):
 
 
 # %%
+def setup_logging(args):
+    """Configure logging based on command line args.
+    Console always logs. If --log-file provided, also write rotating file.
+    """
+    level = getattr(logging, args.log_level.upper(), logging.INFO)
+    handlers = [logging.StreamHandler()]
+    if args.log_file:
+        os.makedirs(os.path.dirname(args.log_file), exist_ok=True) if os.path.dirname(args.log_file) else None
+        file_handler = logging.FileHandler(args.log_file, mode='a')
+        handlers.append(file_handler)
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s | %(levelname)s | %(message)s',
+        handlers=handlers,
+        force=True
+    )
+    logging.getLogger().info("Logging initialized. Level=%s File=%s", args.log_level.upper(), args.log_file or 'None')
+
+
 def sample_and_test(args):
     torch.manual_seed(42)
     # device = 'cuda:0'
@@ -234,12 +274,12 @@ def sample_and_test(args):
 
     exp = args.exp
     output_dir = args.output_path
-    exp_path = os.path.join(output_dir, exp)
 
-    checkpoint_file = exp_path + "/{}.pth"
-    load_checkpoint(checkpoint_file, gen_diffusive_1, 'gen_diffusive_1', device=device)
+    # Try loading checkpoints from output dir; fallback to output_dir/exp if not found
+    load_checkpoint_with_fallback(output_dir, exp, gen_diffusive_1, 'gen_diffusive_1', device=device)
+    load_checkpoint_with_fallback(output_dir, exp, gen_diffusive_2, 'gen_diffusive_2', device=device)
 
-    load_checkpoint(checkpoint_file, gen_diffusive_2, 'gen_diffusive_2', device=device)
+    
 
     dataset = BratsDatasetWrapper(split='test', base_path=args.input_path, target_modality=args.target_modality)
     data_loader = torch.utils.data.DataLoader(dataset,
@@ -251,7 +291,7 @@ def sample_and_test(args):
 
     pos_coeff = Posterior_Coefficients(args, device)
 
-    save_dir = exp_path + "/generated_samples"
+    save_dir = output_dir + "/generated_samples"
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -267,7 +307,7 @@ def sample_and_test(args):
     all_gt_slices = []
     all_cond_data = []  # For debugging/visualization if needed
 
-    print(f"Processing {len(data_loader)} test samples...")
+    logging.info("Processing %d test samples...", len(data_loader))
 
     for iteration, (x1, x2, x3, y) in enumerate(data_loader):
         cond_data1 = x1.to(device, non_blocking=True)
@@ -312,10 +352,10 @@ def sample_and_test(args):
         })
 
         if iteration % 50 == 0:
-            print(f"Processed {iteration}/{len(data_loader)} samples")
+            logging.info("Processed %d/%d samples", iteration, len(data_loader))
 
     # Determine global intensity range for scaling images (to avoid per-slice normalization)
-    print("Computing global intensity range...")
+    logging.info("Computing global intensity range...")
     all_pred_array = np.concatenate([p.flatten() for p in all_pred_slices])
     all_gt_array = np.concatenate([g.flatten() for g in all_gt_slices])
     global_min = float(min(all_pred_array.min(), all_gt_array.min()))
@@ -324,10 +364,10 @@ def sample_and_test(args):
     if global_max <= global_min:
         global_min, global_max = 0.0, 1.0  # default range if images are constant
     
-    print(f"Global intensity range: [{global_min:.4f}, {global_max:.4f}]")
+    logging.info("Global intensity range: [%.4f, %.4f]", global_min, global_max)
 
     # Save slices as PNG images with global scaling
-    print("Saving individual PNG images...")
+    logging.info("Saving individual PNG images...")
     for i, (pred_slice, gt_slice) in enumerate(zip(all_pred_slices, all_gt_slices)):
         # Scale to [0,255] using global min/max for consistency
         pred_img = np.clip((pred_slice - global_min) / (global_max - global_min) * 255.0, 0, 255).astype(np.uint8)
@@ -336,11 +376,11 @@ def sample_and_test(args):
         Image.fromarray(pred_img).save(os.path.join(pred_dir, f"pred_{i:05d}.png"))
         Image.fromarray(gt_img).save(os.path.join(gt_dir, f"gt_{i:05d}.png"))
 
-    print(f"Successfully completed testing!")
-    print(f"Saved {len(all_pred_slices)} predicted slices to '{pred_dir}'")
-    print(f"Saved {len(all_gt_slices)} ground truth slices to '{gt_dir}'")
-    print(f"Original format samples saved to '{save_dir}'")
-    print(f"Target modality: {args.target_modality}")
+    logging.info("Successfully completed testing!")
+    logging.info("Saved %d predicted slices to '%s'", len(all_pred_slices), pred_dir)
+    logging.info("Saved %d ground truth slices to '%s'", len(all_gt_slices), gt_dir)
+    logging.info("Original format samples saved to '%s'", save_dir)
+    logging.info("Target modality: %s", args.target_modality)
 
 
 
@@ -427,9 +467,13 @@ if __name__ == '__main__':
                         help='source contrast')
     parser.add_argument('--target_modality', type=str, default='T1CE',
                         help='Which modality to synthesize (T1, T2, FLAIR, or T1CE)')
+    parser.add_argument('--log-level', type=str, default='INFO', help='Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)')
+    parser.add_argument('--log-file', type=str, default='', help='Optional log file path')
     args = parser.parse_args()
 
     args.attn_resolutions = _as_int_list(args.attn_resolutions)
     args.fir_kernel       = _as_int_list(args.fir_kernel)
+    setup_logging(args)
+    logging.info("Arguments: %s", vars(args))
     sample_and_test(args)
 
