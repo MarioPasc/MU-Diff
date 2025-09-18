@@ -14,6 +14,10 @@ from engine.train import _as_int_list
 from torch.cuda.amp import autocast
 # from torch.utils.checkpoint import checkpoint  # not typically used in eval
 
+import torch.multiprocessing as mp
+mp.set_sharing_strategy("file_system")
+
+
 # Wrapper class to maintain compatibility with existing test loop
 class BratsDatasetWrapper:
     """
@@ -282,10 +286,16 @@ def sample_and_test(args):
     
 
     dataset = BratsDatasetWrapper(split='test', base_path=args.input_path, target_modality=args.target_modality)
-    data_loader = torch.utils.data.DataLoader(dataset,
-                                              batch_size=1,
-                                              shuffle=False,
-                                              num_workers=4)
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=1,            # or 1–2
+        persistent_workers=False, # default; keep explicit
+        pin_memory=False,         # avoid extra fds via CUDA pinned pools
+        prefetch_factor=2
+    )
+
 
     T = get_time_schedule(args, device)
 
