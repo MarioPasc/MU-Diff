@@ -70,20 +70,21 @@ class BratsDataset(Dataset):
     def __len__(self) -> int:
         return self.length
 
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
-        # stack condition modalities
-        cond = [self._to_tensor(self._data[m][idx]) for m in self.modality_order[:-1]]
-        cond_stack = torch.cat(cond, dim=0)  # [3,H,W]
-        tgt_arr = self._data[self.modality_order[-1]][idx]
-        target = self._to_tensor(tgt_arr)     # [1,H,W]
-        return cond_stack, target
+    def __getitem__(self, idx) -> Tuple[Tensor, Tensor]:
+        # Stack condition modality slices into a multi-channel tensor, and get target slice
+        cond_imgs = []
+        for mod in self.modality_order[:-1]:
+            img = self._data[mod][idx]  # numpy slice (H x W)
+            img_tensor = torch.from_numpy(img.astype(np.float32))
+            if img_tensor.dim() == 2:
+                img_tensor = img_tensor.unsqueeze(0)  # add channel dimension [1,H,W]
+            cond_imgs.append(img_tensor)
+        cond_stack = torch.cat(cond_imgs, dim=0)  # shape [3, H, W] for 3 condition images
+        target_mod = self.modality_order[-1]
+        target_img = self._data[target_mod][idx]  # numpy array of shape (H, W)
+        target_tensor = torch.from_numpy(target_img.astype(np.float32)).unsqueeze(0)  # [1,H,W]
+        return cond_stack, target_tensor
 
-    @staticmethod
-    def _to_tensor(arr: np.ndarray) -> Tensor:
-        t = torch.from_numpy(arr)  # arr already float32
-        if t.dim() == 2:
-            t = t.unsqueeze(0)
-        return t
 
     def close(self) -> None:
         """Explicitly close memmap files if use_mmap=True."""
