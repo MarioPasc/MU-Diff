@@ -15,13 +15,24 @@ from torch.utils.cpp_extension import load
 from collections import abc
 
 module_path = os.path.dirname(__file__)
-upfirdn2d_op = load(
-    "upfirdn2d",
-    sources=[
-        os.path.join(module_path, "upfirdn2d.cpp"),
-        os.path.join(module_path, "upfirdn2d_kernel.cu"),
-    ],
-)
+
+# Safer JIT compilation with better error handling and multiprocessing support
+try:
+    upfirdn2d_op = load(
+        name="upfirdn2d",
+        sources=[
+            os.path.join(module_path, "upfirdn2d.cpp"),
+            os.path.join(module_path, "upfirdn2d_kernel.cu"),
+        ],
+        verbose=True,
+        # Use a consistent cache directory across processes
+        build_directory=os.environ.get('TORCH_EXTENSIONS_DIR', None),
+    )
+    print("[UPFIRDN2D] CUDA extension compiled successfully")
+except Exception as e:
+    print(f"[UPFIRDN2D] Warning: Could not compile CUDA extension: {e}")
+    print("[UPFIRDN2D] Falling back to CPU-only implementation")
+    upfirdn2d_op = None
 
 
 class UpFirDn2dBackward(Function):
@@ -29,6 +40,8 @@ class UpFirDn2dBackward(Function):
     def forward(
         ctx, grad_output, kernel, grad_kernel, up, down, pad, g_pad, in_size, out_size
     ):
+        if upfirdn2d_op is None:
+            raise RuntimeError("CUDA upfirdn2d extension not available")
 
         up_x, up_y = up
         down_x, down_y = down
@@ -69,6 +82,8 @@ class UpFirDn2dBackward(Function):
 
     @staticmethod
     def backward(ctx, gradgrad_input):
+        if upfirdn2d_op is None:
+            raise RuntimeError("CUDA upfirdn2d extension not available")
         kernel, = ctx.saved_tensors
 
         gradgrad_input = gradgrad_input.reshape(-1, ctx.in_size[2], ctx.in_size[3], 1)
@@ -96,6 +111,8 @@ class UpFirDn2dBackward(Function):
 class UpFirDn2d(Function):
     @staticmethod
     def forward(ctx, input, kernel, up, down, pad):
+        if upfirdn2d_op is None:
+            raise RuntimeError("CUDA upfirdn2d extension not available")
         up_x, up_y = up
         down_x, down_y = down
         pad_x0, pad_x1, pad_y0, pad_y1 = pad

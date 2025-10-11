@@ -55,6 +55,11 @@ module purge
 module load miniconda
 source activate mudiff
 
+# ===============================
+# Fix CUDA extension compilation issues
+# ===============================
+
+# Set CUDA paths
 export CUDA_HOME="$CONDA_PREFIX"
 export PATH="$CUDA_HOME/bin:$PATH"
 export CPATH="$CUDA_HOME/targets/x86_64-linux/include:$CPATH"
@@ -63,6 +68,13 @@ export LD_LIBRARY_PATH="$CUDA_HOME/targets/x86_64-linux/lib:$LD_LIBRARY_PATH"
 
 # For A100:
 export TORCH_CUDA_ARCH_LIST="8.0"
+
+# Set a consistent PyTorch extensions cache directory (accessible to all processes)
+# This prevents race conditions during JIT compilation in multi-process training
+export TORCH_EXTENSIONS_DIR="$REPO_ROOT/.torch_extensions"
+mkdir -p "$TORCH_EXTENSIONS_DIR"
+
+echo "TORCH_EXTENSIONS_DIR set to: $TORCH_EXTENSIONS_DIR"
 
 # Sanity check
 python - <<'PY'
@@ -88,6 +100,43 @@ if [ ! -d "$DATA_DIR" ]; then
     echo "Please ensure the preprocessed dataset is uploaded to the supercomputer."
     exit 1
 fi
+
+# ===============================
+# Pre-build CUDA extensions
+# ===============================
+echo
+echo "====================================="
+echo "Pre-building CUDA extensions..."
+echo "====================================="
+
+BUILD_SCRIPT="$REPO_ROOT/build_extensions.py"
+if [ -f "$BUILD_SCRIPT" ]; then
+    python "$BUILD_SCRIPT"
+    BUILD_EXIT_CODE=$?
+
+    if [ $BUILD_EXIT_CODE -ne 0 ]; then
+        echo
+        echo "========================================="
+        echo "WARNING: CUDA extension build failed!"
+        echo "========================================="
+        echo "The training might fail or fall back to slower CPU implementations."
+        echo
+        echo "To fix this issue, run the following command manually:"
+        echo "  conda activate mudiff"
+        echo "  conda install -c conda-forge libxcrypt"
+        echo "  python $BUILD_SCRIPT"
+        echo
+        # Don't exit here, let training attempt to continue with fallback
+    fi
+else
+    echo "WARNING: build_extensions.py not found at $BUILD_SCRIPT"
+    echo "Skipping pre-build step. Extensions will be JIT compiled (may cause issues)."
+fi
+
+echo
+echo "====================================="
+echo "Starting training..."
+echo "====================================="
 
 # Execute the experiment
 python "$RUN_PY" -c "$CONFIG_FILE" -e "$EXP_NAME"

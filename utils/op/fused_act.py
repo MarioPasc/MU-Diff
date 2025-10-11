@@ -17,18 +17,31 @@ from torch.utils.cpp_extension import load
 
 module_path = os.path.dirname(__file__)
 print("module_path = {}".format(module_path))
-fused = load(
-    "fused",
-    sources=[
-        os.path.join(module_path, "fused_bias_act.cpp"),
-        os.path.join(module_path, "fused_bias_act_kernel.cu"),
-    ],
-)
+
+# Safer JIT compilation with better error handling and multiprocessing support
+try:
+    fused = load(
+        name="fused",
+        sources=[
+            os.path.join(module_path, "fused_bias_act.cpp"),
+            os.path.join(module_path, "fused_bias_act_kernel.cu"),
+        ],
+        verbose=True,
+        # Use a consistent cache directory across processes
+        build_directory=os.environ.get('TORCH_EXTENSIONS_DIR', None),
+    )
+    print("[FUSED_ACT] CUDA extension compiled successfully")
+except Exception as e:
+    print(f"[FUSED_ACT] Warning: Could not compile CUDA extension: {e}")
+    print("[FUSED_ACT] Falling back to CPU-only implementation")
+    fused = None
 
 
 class FusedLeakyReLUFunctionBackward(Function):
     @staticmethod
     def forward(ctx, grad_output, out, negative_slope, scale):
+        if fused is None:
+            raise RuntimeError("CUDA fused extension not available")
         ctx.save_for_backward(out)
         ctx.negative_slope = negative_slope
         ctx.scale = scale
@@ -50,6 +63,8 @@ class FusedLeakyReLUFunctionBackward(Function):
 
     @staticmethod
     def backward(ctx, gradgrad_input, gradgrad_bias):
+        if fused is None:
+            raise RuntimeError("CUDA fused extension not available")
         out, = ctx.saved_tensors
         gradgrad_out = fused.fused_bias_act(
             gradgrad_input, gradgrad_bias, out, 3, 1, ctx.negative_slope, ctx.scale
@@ -61,6 +76,8 @@ class FusedLeakyReLUFunctionBackward(Function):
 class FusedLeakyReLUFunction(Function):
     @staticmethod
     def forward(ctx, input, bias, negative_slope, scale):
+        if fused is None:
+            raise RuntimeError("CUDA fused extension not available")
         empty = input.new_empty(0)
         out = fused.fused_bias_act(input, bias, empty, 3, 0, negative_slope, scale)
         ctx.save_for_backward(out)
