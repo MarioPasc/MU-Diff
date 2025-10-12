@@ -1,0 +1,75 @@
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module fused...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module fused...
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module upfirdn2d...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module upfirdn2d...
+[W1012 19:26:06.847835411 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+[W1012 19:26:06.848847152 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module fused...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module fused...
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module upfirdn2d...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module fused...
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module upfirdn2d...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+libibverbs: Warning: couldn't load driver 'libbnxt_re-rdmav34.so': libbnxt_re-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libhfi1verbs-rdmav34.so': libhfi1verbs-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libmlx4-rdmav34.so': libmlx4-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libcxgb4-rdmav34.so': libcxgb4-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libipathverbs-rdmav34.so': libipathverbs-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libqedr-rdmav34.so': libqedr-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libocrdma-rdmav34.so': libocrdma-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libsiw-rdmav34.so': libsiw-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libmthca-rdmav34.so': libmthca-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libefa-rdmav34.so': libefa-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libirdma-rdmav34.so': libirdma-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'librxe-rdmav34.so': librxe-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libvmw_pvrdma-rdmav34.so': libvmw_pvrdma-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libhns-rdmav34.so': libhns-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libbnxt_re-rdmav34.so': libbnxt_re-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libhfi1verbs-rdmav34.so': libhfi1verbs-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libmlx4-rdmav34.so': libmlx4-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libcxgb4-rdmav34.so': libcxgb4-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libipathverbs-rdmav34.so': libipathverbs-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libqedr-rdmav34.so': libqedr-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libocrdma-rdmav34.so': libocrdma-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libsiw-rdmav34.so': libsiw-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libmthca-rdmav34.so': libmthca-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libefa-rdmav34.so': libefa-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libirdma-rdmav34.so': libirdma-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'librxe-rdmav34.so': librxe-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libvmw_pvrdma-rdmav34.so': libvmw_pvrdma-rdmav34.so: cannot open shared object file: No such file or directory
+libibverbs: Warning: couldn't load driver 'libhns-rdmav34.so': libhns-rdmav34.so: cannot open shared object file: No such file or directory
+Loading extension module upfirdn2d...
+/mnt2/fscratch/users/tic_163_uma/mpascual/repos/MU-Diff/engine/train.py:567: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  result = model_ddp.load_state_dict(torch.load(path, map_location=device), strict=False)
+Loading extension module upfirdn2d...
+/mnt2/fscratch/users/tic_163_uma/mpascual/repos/MU-Diff/engine/train.py:567: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  result = model_ddp.load_state_dict(torch.load(path, map_location=device), strict=False)
+[rank1]:[E1012 20:28:49.057051422 ProcessGroupNCCL.cpp:607] [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=668, OpType=ALLREDUCE, NumelIn=52, NumelOut=52, Timeout(ms)=600000) ran for 600097 milliseconds before timing out.
+[rank1]:[E1012 20:28:49.067761202 ProcessGroupNCCL.cpp:1664] [PG 0 (default_pg) Rank 1] Exception (either an error or timeout) detected by watchdog at work: 668, last enqueued NCCL work: 669, last completed NCCL work: 667.
+[rank1]:[E1012 20:28:49.069012768 ProcessGroupNCCL.cpp:1709] [PG 0 (default_pg) Rank 1] Timeout at NCCL work: 668, last enqueued NCCL work: 669, last completed NCCL work: 667.
+[rank1]:[E1012 20:28:49.069025672 ProcessGroupNCCL.cpp:621] [Rank 1] Some NCCL operations have failed or timed out. Due to the asynchronous nature of CUDA kernels, subsequent GPU operations might run on corrupted/incomplete data.
+[rank1]:[E1012 20:28:49.069036513 ProcessGroupNCCL.cpp:627] [Rank 1] To avoid data inconsistency, we are taking the entire process down.
+[rank1]:[E1012 20:28:49.072517530 ProcessGroupNCCL.cpp:1515] [PG 0 (default_pg) Rank 1] Process group watchdog thread terminated with exception: [Rank 1] Watchdog caught collective operation timeout: WorkNCCL(SeqNum=668, OpType=ALLREDUCE, NumelIn=52, NumelOut=52, Timeout(ms)=600000) ran for 600097 milliseconds before timing out.
+Exception raised from checkTimeout at ../torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp:609 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::string) + 0x96 (0x15113c977f86 in /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.8/site-packages/torch/lib/libc10.so)
+frame #1: c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(std::optional<std::chrono::duration<long, std::ratio<1l, 1000l> > >) + 0x1d2 (0x1510ee9b78f2 in /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.8/site-packages/torch/lib/libtorch_cuda.so)
+frame #2: c10d::ProcessGroupNCCL::watchdogHandler() + 0x233 (0x1510ee9be333 in /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.8/site-packages/torch/lib/libtorch_cuda.so)
+frame #3: c10d::ProcessGroupNCCL::ncclCommWatchdog() + 0x10c (0x1510ee9c071c in /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.8/site-packages/torch/lib/libtorch_cuda.so)
+frame #4: <unknown function> + 0xdbbf4 (0x15113c0c7bf4 in /mnt2/fscratch/users/tic_163_uma/mpascual/conda_envs/mudiff/bin/../lib/libstdc++.so.6)
+frame #5: <unknown function> + 0x94ac3 (0x15113e232ac3 in /lib/x86_64-linux-gnu/libc.so.6)
+frame #6: <unknown function> + 0x126850 (0x15113e2c4850 in /lib/x86_64-linux-gnu/libc.so.6)
+

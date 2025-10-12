@@ -8,9 +8,21 @@ import os
 # os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "1")   # serialized kernels → accurate trace; ONLY FOR DEBUGGING
 os.environ.setdefault("NCCL_DEBUG", "WARN")          # INFO if you want more detail
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # better allocator behavior
+
+# NCCL timeout configuration for distributed training
+# Default: 30 minutes (1800 seconds) to handle long operations on supercomputing clusters
+# Can be overridden via environment variable: export NCCL_TIMEOUT_MINUTES=60
+nccl_timeout_minutes = int(os.environ.get("NCCL_TIMEOUT_MINUTES", "30"))
+os.environ.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")  # Enable async error handling for better debugging
+os.environ.setdefault("NCCL_BLOCKING_WAIT", "1")  # Use blocking wait to catch errors immediately
+
+# Set NCCL timeout for PyTorch distributed operations
+import datetime
+torch.distributed.distributed_c10d._DEFAULT_PG_TIMEOUT = datetime.timedelta(minutes=nccl_timeout_minutes)
+
 torch.autograd.set_detect_anomaly(False)  # TEMPORARY
 
-RETAIN_GRAPH: bool = True  # whether to retain graph in D step for debugging only; should be False for normal training
+RETAIN_GRAPH: bool = False  # whether to retain graph in D step for debugging only; should be False for normal training
 
 from backbones.dense_layer import conv2d
 
@@ -397,11 +409,14 @@ def train_mudiff(rank, gpu, args):
                                                                     num_replicas=args.world_size,
                                                                     rank=rank)
     
-    tw = int(os.environ.get("MU_TRAIN_WORKERS", "8"))
-    vw = int(os.environ.get("MU_VAL_WORKERS",   "4"))
+    # Data loader worker configuration
+    # Reduced default workers from 8 to 4 to avoid file descriptor exhaustion on clusters
+    tw = int(os.environ.get("MU_TRAIN_WORKERS", "4"))
+    vw = int(os.environ.get("MU_VAL_WORKERS",   "2"))
     prefetch = int(os.environ.get("MU_PREFETCH", "2"))
     persistent = bool(int(os.environ.get("MU_PERSISTENT", "0"))) and tw > 0
-    timeout_s = int(os.environ.get("MU_DL_TIMEOUT", "600"))
+    # Reduced timeout from 600s to 120s to catch hangs earlier and prevent NCCL timeouts
+    timeout_s = int(os.environ.get("MU_DL_TIMEOUT", "120"))
     
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -450,10 +465,8 @@ def train_mudiff(rank, gpu, args):
                                            t_emb_dim=args.t_emb_dim,
                                            act=nn.LeakyReLU(0.2)).to(device, memory_format=torch.channels_last)
 
-    broadcast_params(gen_diffusive_1.parameters())
-    broadcast_params(gen_diffusive_2.parameters())
-
-    broadcast_params(disc_diffusive_2.parameters())
+    # Note: broadcast_params removed - DDP automatically synchronizes parameters during initialization
+    # This avoids redundant communication and potential synchronization issues
 
     optimizer_disc_diffusive_2 = optim.Adam(disc_diffusive_2.parameters(), lr=args.lr_d, betas=(args.beta1, args.beta2))
 
@@ -501,6 +514,16 @@ def train_mudiff(rank, gpu, args):
         p2, t2 = _count_params(gen_diffusive_2)
         pd, td = _count_params(disc_diffusive_2)
         print(f"[MODEL] G1 params: {p1:,} (trainable {t1:,}); G2 params: {p2:,} (trainable {t2:,}); D params: {pd:,} (trainable {td:,})", flush=True)
+
+        # Print distributed training configuration
+        print(f"\n[CONFIG] Distributed Training Configuration:", flush=True)
+        print(f"  - World size: {args.world_size}", flush=True)
+        print(f"  - NCCL timeout: {nccl_timeout_minutes} minutes", flush=True)
+        print(f"  - Data loader workers (train/val): {tw}/{vw}", flush=True)
+        print(f"  - Data loader timeout: {timeout_s} seconds", flush=True)
+        print(f"  - Prefetch factor: {prefetch}", flush=True)
+        print(f"  - Persistent workers: {persistent}", flush=True)
+        print(f"  - RETAIN_GRAPH: {RETAIN_GRAPH}\n", flush=True)
 
 
     output_path = args.output_path
@@ -601,7 +624,12 @@ def train_mudiff(rank, gpu, args):
         iter_start_time = time.time()
 
         for iteration, (x1, x2, x3, x4) in enumerate(data_loader):
-            data_time = time.time() - iter_start_time
+            try:
+                data_time = time.time() - iter_start_time
+            except Exception as e:
+                if rank == 0:
+                    print(f"[rank {rank}] Data loader error at iteration {iteration}: {e}", flush=True)
+                raise RuntimeError(f"Data loader failed at iteration {iteration}: {e}")
             # ---- D step ----
             # Enable D grads, disable G grads (extra safety even though we use no_grad for G forwards)
             for p in disc_diffusive_2.parameters():
@@ -835,6 +863,10 @@ def train_mudiff(rank, gpu, args):
                 # reset timer for next iter
                 iter_start_time = time.time()
 
+            # Heartbeat logging every 50 iterations to detect hangs/desynchronization
+            if iteration > 0 and iteration % 50 == 0:
+                print(f"[rank {rank}] Heartbeat: epoch={epoch} iter={iteration} global_step={global_step}", flush=True)
+
         if not args.no_lr_decay:
             scheduler_gen_diffusive_1.step()
             scheduler_gen_diffusive_2.step()
@@ -978,7 +1010,7 @@ def init_processes(rank, size, fn, args):
 
     # Robustly pin each child to exactly ONE CUDA device
     vis = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-    
+
     print(f"[rank: {rank}] pre-pinning to GPU, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}", flush=True)
 
     if vis:
@@ -996,14 +1028,35 @@ def init_processes(rank, size, fn, args):
 
     print(f"[rank: {rank}] pinned to GPU {gpu}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}", flush=True)
 
+    # Initialize process group with explicit timeout
+    timeout = datetime.timedelta(minutes=nccl_timeout_minutes)
+    dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size, timeout=timeout)
 
-    dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
+    training_succeeded = False
     try:
         fn(rank, gpu, args)
+        training_succeeded = True
+        # Only barrier if training succeeded to avoid hanging on errors
+        if rank == 0:
+            print(f"[rank: {rank}] Training completed successfully, synchronizing ranks...", flush=True)
         dist.barrier()
+    except Exception as e:
+        print(f"[rank: {rank}] ERROR during training: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        # Don't barrier on error - let process exit immediately
+        raise
     finally:
         if dist.is_initialized():
-            dist.destroy_process_group()
+            try:
+                if not training_succeeded:
+                    # Give other ranks a moment to detect the error before destroying process group
+                    time.sleep(2)
+                dist.destroy_process_group()
+                if rank == 0:
+                    print(f"[rank: {rank}] Process group destroyed", flush=True)
+            except Exception as e:
+                print(f"[rank: {rank}] Error destroying process group: {e}", flush=True)
 
 def _as_int_list(v):
     if isinstance(v, (list, tuple)):
