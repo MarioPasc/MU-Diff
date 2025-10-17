@@ -666,8 +666,11 @@ def train_mudiff(rank, gpu, args):
                 with autocast('cuda', enabled=False):
                     D2_real_r1, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                     # build graph for penalty so it contributes gradients to D (R1 needs create_graph=True)
+                    # IMPORTANT: retain_graph=True is required here because grad_penalty2 will be part of d_total,
+                    # and when we call backward() on d_total, PyTorch needs the computation graph for D2_real_r1
+                    # to still exist in order to compute second-order gradients through grad2_real
                     grad2_real = torch.autograd.grad(
-                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True, retain_graph=RETAIN_GRAPH
+                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True, retain_graph=True
                     )[0]
                     grad2_penalty = (grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2).mean()
                     grad_penalty2 = (args.r1_gamma / 2) * grad2_penalty

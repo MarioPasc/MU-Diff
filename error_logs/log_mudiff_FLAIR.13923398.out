@@ -1,13 +1,13 @@
-Creating results directory: /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_T2
+Results directory already exists: /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_FLAIR
 =====================================
 SLURM JOB: FLAIR Synthesis with MU-Diff
 =====================================
-Job ID: 13920881
-Job Name: MUDIFF_T2
-Node: exa02
+Job ID: 13923398
+Job Name: MUDIFF_FLAIR
+Node: exa03
 CPUs per task: 8
 Memory: 256000 MB
-Start Time: Sun Oct 12 07:25:34 PM CEST 2025
+Start Time: Wed Oct 15 04:16:40 PM CEST 2025
 Working Directory: /mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF
 =====================================
 
@@ -57,10 +57,10 @@ Starting training...
 =====================================
 Node rank 0, local proc 0, global proc 0
 Node rank 0, local proc 1, global proc 1
-[rank: 0] pre-pinning to GPU, CUDA_VISIBLE_DEVICES=6,7
-[rank: 1] pre-pinning to GPU, CUDA_VISIBLE_DEVICES=6,7
-[rank: 0] pinned to GPU 0, CUDA_VISIBLE_DEVICES=6
-[rank: 1] pinned to GPU 0, CUDA_VISIBLE_DEVICES=7
+[rank: 0] pre-pinning to GPU, CUDA_VISIBLE_DEVICES=5,6
+[rank: 1] pre-pinning to GPU, CUDA_VISIBLE_DEVICES=5,6
+[rank: 1] pinned to GPU 0, CUDA_VISIBLE_DEVICES=6
+[rank: 0] pinned to GPU 0, CUDA_VISIBLE_DEVICES=5
 module_path = /mnt2/fscratch/users/tic_163_uma/mpascual/repos/MU-Diff/utils/op
 ninja: no work to do.
 [FUSED_ACT] CUDA extension compiled successfully
@@ -72,16 +72,47 @@ NCCL version 2.20.5+cuda12.4
 [UPFIRDN2D] CUDA extension compiled successfully
 train data size:13562
 val data size:3875
-target modality:T2
+target modality:FLAIR
 [MODEL] G1 params: 20,472,065 (trainable 20,472,065); G2 params: 21,399,681 (trainable 21,399,681); D params: 27,736,705 (trainable 27,736,705)
-[UPFIRDN2D] CUDA extension compiled successfully
-train data size:13562
-val data size:3875
-target modality:T2
-[PRETRAIN] Loading generators from /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/t2
+
+[CONFIG] Distributed Training Configuration:
+  - World size: 2
+  - NCCL timeout: 30 minutes
+  - Data loader workers (train/val): 4/2
+  - Data loader timeout: 120 seconds
+  - Prefetch factor: 2
+  - Persistent workers: False
+  - RETAIN_GRAPH: False
+
+[PRETRAIN] Loading generators from /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/flair
 [PRETRAIN] gen_diffusive_1.pth loaded (missing=0 unexpected=0)
 [PRETRAIN] gen_diffusive_2.pth loaded (missing=0 unexpected=0)
 [PRETRAIN] Pretrained initialization done.
+[UPFIRDN2D] CUDA extension compiled successfully
+train data size:13562
+val data size:3875
+target modality:FLAIR
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 256, 120, 120)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 60, 60)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 30, 30)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 15, 15)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 7, 7)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 3, 3)
+[GAP] in=64  fc.in=64  fc.out=256
+[ADAGN] pseudo_target=(2, 1, 240, 240)
+head=Linear 256->256
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 256, 120, 120)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 60, 60)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 30, 30)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 15, 15)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 7, 7)
+[D] downsample_2d in_dtype=torch.float16, shape=(2, 512, 3, 3)
+[GAP] in=64  fc.in=64  fc.out=256
+[ADAGN] pseudo_target=(2, 1, 240, 240)
+head=Linear 256->256
+[rank: 0] ERROR during training: Trying to backward through the graph a second time (or directly access saved tensors after they have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.
+[rank: 1] ERROR during training: Trying to backward through the graph a second time (or directly access saved tensors after they have already been freed). Saved intermediate values of the graph are freed when you call .backward() or autograd.grad(). Specify retain_graph=True if you need to backward through the graph a second time or if you need to access saved tensors after calling backward.
+[rank: 0] Process group destroyed
 [ENV] SLURM environment detected.
 
 =====================================
@@ -102,14 +133,14 @@ PATH            : /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudif
 =====================================
  MU-Diff Experiment Orchestrator
 =====================================
-Start (UTC)     : 2025-10-12T17:25:51.351064Z
-Host            : exa02
+Start (UTC)     : 2025-10-15T14:16:51.859921Z
+Host            : exa03
 User            : mpascual
 Working Dir     : /mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF
 Python Exec     : /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/bin/python
 Python Version  : 3.8.20
 Platform        : Linux-5.15.0-1060-nvidia-x86_64-with-glibc2.17
-Interpreter Args: /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/experiments/run.py -c /mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF/cfg.yaml -e synthesize_T2
+Interpreter Args: /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/experiments/run.py -c /mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF/cfg.yaml -e synthesize_FLAIR
 
 --- SLURM Environment ---
 SLURM_CLUSTER_NAME          : scbi
@@ -117,14 +148,14 @@ SLURM_CONF                  : /etc/slurm/slurm.conf
 SLURM_CPUS_ON_NODE          : 8
 SLURM_CPUS_PER_TASK         : 8
 SLURM_GTIDS                 : 0
-SLURM_JOBID                 : 13920881
+SLURM_JOBID                 : 13923398
 SLURM_JOB_ACCOUNT           : mpascual
 SLURM_JOB_CPUS_PER_NODE     : 8
 SLURM_JOB_GID               : 3112
-SLURM_JOB_GPUS              : 6,7
-SLURM_JOB_ID                : 13920881
-SLURM_JOB_NAME              : MUDIFF_T2
-SLURM_JOB_NODELIST          : exa02
+SLURM_JOB_GPUS              : 5,6
+SLURM_JOB_ID                : 13923398
+SLURM_JOB_NAME              : MUDIFF_FLAIR
+SLURM_JOB_NODELIST          : exa03
 SLURM_JOB_NUM_NODES         : 1
 SLURM_JOB_PARTITION         : all_nodes
 SLURM_JOB_QOS               : normal
@@ -134,7 +165,7 @@ SLURM_LOCALID               : 0
 SLURM_MEM_PER_NODE          : 256000
 SLURM_NNODES                : 1
 SLURM_NODEID                : 0
-SLURM_NODELIST              : exa02
+SLURM_NODELIST              : exa03
 SLURM_NODE_ALIASES          : (null)
 SLURM_NPROCS                : 1
 SLURM_NTASKS                : 1
@@ -143,14 +174,14 @@ SLURM_PROCID                : 0
 SLURM_SUBMIT_DIR            : /mnt/home/users/tic_163_uma/mpascual/execs/MUDIFF
 SLURM_SUBMIT_HOST           : picasso
 SLURM_TASKS_PER_NODE        : 1
-SLURM_TASK_PID              : 2099152
-SLURM_TOPOLOGY_ADDR         : exa02
+SLURM_TASK_PID              : 1809329
+SLURM_TOPOLOGY_ADDR         : exa03
 SLURM_TOPOLOGY_ADDR_PATTERN : node
 SLURM_WORKING_CLUSTER       : scbi:10.248.128.51:6817:9216:101
 =====================================
 
 
-=== Running Experiment: synthesize_T2 ===
+=== Running Experiment: synthesize_FLAIR ===
 
 Preparing training phase...
 
@@ -165,11 +196,11 @@ centered             : True
 ch_mult              : [1, 2, 4]
 conditional          : True
 contrast1            : T1
-contrast2            : FLAIR
+contrast2            : T2
 dropout              : 0.0
 ema_decay            : 0.9999
 embedding_type       : positional
-exp                  : synthesize_T2
+exp                  : synthesize_FLAIR
 fir                  : True
 fir_kernel           : [1, 3, 3, 1]
 fourier_scale        : 16.0
@@ -196,9 +227,9 @@ num_process_per_node : 2
 num_res_blocks       : 2
 num_timesteps        : 4
 nz                   : 100
-output_path          : /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_T2
-port_num             : 6023
-pretrained_dir       : /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/t2
+output_path          : /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_FLAIR
+port_num             : 6022
+pretrained_dir       : /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/flair
 progressive          : none
 progressive_combine  : sum
 progressive_input    : residual
@@ -212,7 +243,7 @@ save_content_every   : 1
 seed                 : 1024
 skip_rescale         : True
 t_emb_dim            : 256
-target_modality      : T2
+target_modality      : FLAIR
 use_ema              : False
 use_geometric        : False
 z_emb_dim            : 256
@@ -228,11 +259,11 @@ MUDIFF_TRAIN_CENTERED             : True
 MUDIFF_TRAIN_CH_MULT              : 1,2,4
 MUDIFF_TRAIN_CONDITIONAL          : True
 MUDIFF_TRAIN_CONTRAST1            : T1
-MUDIFF_TRAIN_CONTRAST2            : FLAIR
+MUDIFF_TRAIN_CONTRAST2            : T2
 MUDIFF_TRAIN_DROPOUT              : 0.0
 MUDIFF_TRAIN_EMA_DECAY            : 0.9999
 MUDIFF_TRAIN_EMBEDDING_TYPE       : positional
-MUDIFF_TRAIN_EXP                  : synthesize_T2
+MUDIFF_TRAIN_EXP                  : synthesize_FLAIR
 MUDIFF_TRAIN_FIR                  : True
 MUDIFF_TRAIN_FIR_KERNEL           : 1,3,3,1
 MUDIFF_TRAIN_FOURIER_SCALE        : 16.0
@@ -259,9 +290,9 @@ MUDIFF_TRAIN_NUM_RES_BLOCKS       : 2
 MUDIFF_TRAIN_NUM_TIMESTEPS        : 4
 MUDIFF_TRAIN_NZ                   : 100
 MUDIFF_TRAIN_N_MLP                : 3
-MUDIFF_TRAIN_OUTPUT_PATH          : /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_T2
-MUDIFF_TRAIN_PORT_NUM             : 6023
-MUDIFF_TRAIN_PRETRAINED_DIR       : /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/t2
+MUDIFF_TRAIN_OUTPUT_PATH          : /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_FLAIR
+MUDIFF_TRAIN_PORT_NUM             : 6022
+MUDIFF_TRAIN_PRETRAINED_DIR       : /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/flair
 MUDIFF_TRAIN_PROGRESSIVE          : none
 MUDIFF_TRAIN_PROGRESSIVE_COMBINE  : sum
 MUDIFF_TRAIN_PROGRESSIVE_INPUT    : residual
@@ -274,16 +305,16 @@ MUDIFF_TRAIN_SAVE_CONTENT         : True
 MUDIFF_TRAIN_SAVE_CONTENT_EVERY   : 1
 MUDIFF_TRAIN_SEED                 : 1024
 MUDIFF_TRAIN_SKIP_RESCALE         : True
-MUDIFF_TRAIN_TARGET_MODALITY      : T2
+MUDIFF_TRAIN_TARGET_MODALITY      : FLAIR
 MUDIFF_TRAIN_T_EMB_DIM            : 256
 MUDIFF_TRAIN_USE_EMA              : False
 MUDIFF_TRAIN_USE_GEOMETRIC        : False
 MUDIFF_TRAIN_Z_EMB_DIM            : 256
-Train command: /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/bin/python ../engine/train.py --seed 1024 --pretrained_dir /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/t2 --image_size 256 --num_channels 1 --target_modality T2 --beta_min 0.1 --beta_max 20.0 --num_timesteps 4 --num_channels_dae 64 --n_mlp 3 --ch_mult 1 2 4 --num_res_blocks 2 --attn_resolutions 16 --dropout 0.0 --fir_kernel 1,3,3,1 --resblock_type biggan --progressive none --progressive_input residual --progressive_combine sum --embedding_type positional --fourier_scale 16.0 --z_emb_dim 256 --t_emb_dim 256 --nz 100 --ngf 64 --batch_size 2 --num_epoch 30 --lr_g 0.00016 --lr_d 0.0001 --beta1 0.5 --beta2 0.9 --ema_decay 0.9999 --r1_gamma 0.05 --lazy_reg 16 --lambda_l1_loss 0.5 --lambda_mask_loss 0.1 --lambda_adv 1.0 --save_content --save_content_every 1 --save_ckpt_every 10 --num_proc_node 1 --num_process_per_node 2 --node_rank 0 --local_rank 0 --master_address 127.0.0.1 --port_num 6023 --contrast1 T1 --contrast2 FLAIR --input_path /mnt/home/users/tic_163_uma/mpascual/fscratch/datasets/meningiomas/diffusion_brats --output_path /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_T2 --exp synthesize_T2
-Training failed for synthesize_T2
+Train command: /mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/bin/python ../engine/train.py --seed 1024 --pretrained_dir /mnt/home/users/tic_163_uma/mpascual/fscratch/pretrained_weights_mudiff/flair --image_size 256 --num_channels 1 --target_modality FLAIR --beta_min 0.1 --beta_max 20.0 --num_timesteps 4 --num_channels_dae 64 --n_mlp 3 --ch_mult 1 2 4 --num_res_blocks 2 --attn_resolutions 16 --dropout 0.0 --fir_kernel 1,3,3,1 --resblock_type biggan --progressive none --progressive_input residual --progressive_combine sum --embedding_type positional --fourier_scale 16.0 --z_emb_dim 256 --t_emb_dim 256 --nz 100 --ngf 64 --batch_size 2 --num_epoch 30 --lr_g 0.00016 --lr_d 0.0001 --beta1 0.5 --beta2 0.9 --ema_decay 0.9999 --r1_gamma 0.05 --lazy_reg 16 --lambda_l1_loss 0.5 --lambda_mask_loss 0.1 --lambda_adv 1.0 --save_content --save_content_every 1 --save_ckpt_every 10 --num_proc_node 1 --num_process_per_node 2 --node_rank 0 --local_rank 0 --master_address 127.0.0.1 --port_num 6022 --contrast1 T1 --contrast2 T2 --input_path /mnt/home/users/tic_163_uma/mpascual/fscratch/datasets/meningiomas/diffusion_brats --output_path /mnt/home/users/tic_163_uma/mpascual/fscratch/results/synthesize_FLAIR --exp synthesize_FLAIR
+Training failed for synthesize_FLAIR
 
 =========================================
 ERROR: FLAIR synthesis experiment failed!
 =========================================
 Exit code: 1
-Check error logs: log_mudiff_flair.13920881.err
+Check error logs: log_mudiff_flair.13923398.err
