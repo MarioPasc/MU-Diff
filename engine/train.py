@@ -13,8 +13,9 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # 
 # Default: 30 minutes (1800 seconds) to handle long operations on supercomputing clusters
 # Can be overridden via environment variable: export NCCL_TIMEOUT_MINUTES=60
 nccl_timeout_minutes = int(os.environ.get("NCCL_TIMEOUT_MINUTES", "30"))
-os.environ.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")  # Enable async error handling for better debugging
-os.environ.setdefault("NCCL_BLOCKING_WAIT", "1")  # Use blocking wait to catch errors immediately
+# Updated to use TORCH_NCCL_* prefix (NCCL_* is deprecated as of PyTorch 1.13+)
+os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")  # Enable async error handling for better debugging
+os.environ.setdefault("TORCH_NCCL_BLOCKING_WAIT", "1")  # Use blocking wait to catch errors immediately
 
 # Set NCCL timeout for PyTorch distributed operations
 import datetime
@@ -455,15 +456,18 @@ def train_mudiff(rank, gpu, args):
     critic_criterian = nn.BCEWithLogitsLoss(reduction='none')
 
     # networks performing reverse denoising
-    gen_diffusive_1 = NCSNpp(args).to(device, memory_format=torch.channels_last)
-    gen_diffusive_2 = NCSNpp_adaptive(args).to(device, memory_format=torch.channels_last)
+    # NOTE: channels_last memory format should only be applied to activation tensors (data),
+    # not to model parameters, as it can cause gradient stride mismatches with DDP.
+    # Data tensors are converted to channels_last format where needed (see lines 645-648, 737-740, etc.)
+    gen_diffusive_1 = NCSNpp(args).to(device)
+    gen_diffusive_2 = NCSNpp_adaptive(args).to(device)
 
     args.num_channels = 1
-    att_conv = conv2d(64 * 8, 1, 1, padding=0).to(device, memory_format=torch.channels_last)
+    att_conv = conv2d(64 * 8, 1, 1, padding=0).to(device)
 
     disc_diffusive_2 = Discriminator_large(nc=2, ngf=args.ngf,
                                            t_emb_dim=args.t_emb_dim,
-                                           act=nn.LeakyReLU(0.2)).to(device, memory_format=torch.channels_last)
+                                           act=nn.LeakyReLU(0.2)).to(device)
 
     # Note: broadcast_params removed - DDP automatically synchronizes parameters during initialization
     # This avoids redundant communication and potential synchronization issues
@@ -553,7 +557,8 @@ def train_mudiff(rank, gpu, args):
 
     if args.resume:
         checkpoint_file = os.path.join(exp_path, 'content.pth')
-        checkpoint = torch.load(checkpoint_file, map_location=device)
+        # weights_only=False required for loading full checkpoints with optimizer/scheduler states
+        checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False)
         init_epoch = checkpoint['epoch']
         epoch = init_epoch
         gen_diffusive_1.load_state_dict(checkpoint['gen_diffusive_1_dict'])
@@ -587,7 +592,8 @@ def train_mudiff(rank, gpu, args):
                         print(f"[PRETRAIN] File not found: {path}")
                     return
                 try:
-                    result = model_ddp.load_state_dict(torch.load(path, map_location=device), strict=False)
+                    # weights_only=True for loading state_dicts (secure, only tensors)
+                    result = model_ddp.load_state_dict(torch.load(path, map_location=device, weights_only=True), strict=False)
                     missing = getattr(result, 'missing_keys', None) or (result[0] if isinstance(result, (list, tuple)) else [])
                     unexpected = getattr(result, 'unexpected_keys', None) or (result[1] if isinstance(result, (list, tuple)) else [])
                     if rank == 0:

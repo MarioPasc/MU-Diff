@@ -195,7 +195,8 @@ def load_checkpoint(template: str, net: torch.nn.Module, name: str, device: torc
     Load a .pth saved via torch.save(model.state_dict()) from DDP, removing 'module.' prefix when present.
     """
     path = template.format(name)
-    ckpt = torch.load(path, map_location=device)
+    # weights_only=True for loading state_dicts (secure, only tensors)
+    ckpt = torch.load(path, map_location=device, weights_only=True)
     if isinstance(ckpt, dict) and any(k.startswith('module.') for k in ckpt.keys()):
         ckpt = { (k[7:] if k.startswith('module.') else k): v for k, v in ckpt.items() }
     net.load_state_dict(ckpt, strict=False)
