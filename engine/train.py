@@ -475,6 +475,26 @@ def train_mudiff(rank, gpu, args):
                                            t_emb_dim=args.t_emb_dim,
                                            act=nn.LeakyReLU(0.2)).to(device)
 
+    # ============ STRIDE FIX: Ensure contiguous parameters before DDP wrapping ============
+    def ensure_contiguous_params(model, model_name, rank):
+        """Ensure all model parameters are contiguous before DDP wrapping"""
+        if rank == 0:
+            print(f"[STRIDE-FIX] Ensuring contiguous parameters for {model_name}")
+        for name, param in model.named_parameters():
+            if not param.is_contiguous():
+                if rank == 0:
+                    print(f"  [STRIDE-FIX] Making {name} contiguous: shape={tuple(param.shape)}")
+                # Replace non-contiguous parameter with contiguous copy
+                param.data = param.data.contiguous()
+
+        # Verify all parameters are contiguous
+        non_contig = [n for n, p in model.named_parameters() if not p.is_contiguous()]
+        if rank == 0:
+            if not non_contig:
+                print(f"  [STRIDE-FIX] ✓ All {model_name} parameters are contiguous")
+            else:
+                print(f"  [WARNING] Still non-contiguous: {non_contig[:5]}")
+
     # Note: broadcast_params removed - DDP automatically synchronizes parameters during initialization
     # This avoids redundant communication and potential synchronization issues
 
@@ -510,6 +530,13 @@ def train_mudiff(rank, gpu, args):
         gradient_as_bucket_view=True,      # grads como vistas → menos copias
         static_graph=True                  # grafo estable → menos metadatos
     )
+
+    # Apply stride fix before DDP wrapping
+    ensure_contiguous_params(gen_diffusive_1, "gen_diffusive_1", rank)
+    ensure_contiguous_params(gen_diffusive_2, "gen_diffusive_2", rank)
+    ensure_contiguous_params(disc_diffusive_2, "disc_diffusive_2", rank)
+
+    # NOW wrap with DDP
     gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, **ddp_kwargs)
     gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, **ddp_kwargs)
     disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, **ddp_kwargs)
