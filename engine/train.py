@@ -515,9 +515,11 @@ def train_mudiff(rank, gpu, args):
     disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, **ddp_kwargs)
 
     # ============ DIAGNOSTIC LOGGING FOR STRIDE MISMATCH ============
-    # Add gradient hooks to detect non-contiguous gradients
+    # Add gradient hooks to detect AND FIX non-contiguous gradients
+    # This is necessary because channels_last input format can create gradients
+    # with non-standard strides that conflict with DDP's gradient_as_bucket_view=True
     def check_grad_stride(name, param):
-        """Hook to check gradient strides after backward pass"""
+        """Hook to check gradient strides after backward pass and make them contiguous if needed"""
         def hook(grad):
             if grad is not None:
                 is_contig = grad.is_contiguous()
@@ -526,10 +528,13 @@ def train_mudiff(rank, gpu, args):
                     print(f"  shape={tuple(grad.shape)}, stride={tuple(grad.stride())}")
                     print(f"  expected_stride={tuple(grad.contiguous().stride())}")
                     print(f"  dtype={grad.dtype}, device={grad.device}")
+                    print(f"  FIX: Making gradient contiguous to avoid DDP bucket view mismatch")
+                    # Return contiguous gradient to fix stride mismatch
+                    return grad.contiguous()
             return grad
         return hook
 
-    # Register hooks on all parameters
+    # Register hooks on all parameters - now with parameter shape logging
     if rank == 0:
         print("[STRIDE-DIAG] Registering gradient stride checking hooks...")
     for model, model_name in [(gen_diffusive_1, "gen_diffusive_1"),
@@ -537,10 +542,15 @@ def train_mudiff(rank, gpu, args):
                                (disc_diffusive_2, "disc_diffusive_2")]:
         for param_name, param in model.named_parameters():
             if param.requires_grad:
+                # Log parameter shapes to identify the [64, 1, 3, 3] weight
+                if rank == 0 and tuple(param.shape) == (64, 1, 3, 3):
+                    print(f"[STRIDE-DIAG] Found [64, 1, 3, 3] parameter: {model_name}.{param_name}")
+                    print(f"  Initial stride: {tuple(param.stride())}, is_contiguous: {param.is_contiguous()}")
                 param.register_hook(check_grad_stride(f"{model_name}.{param_name}", param))
 
     if rank == 0:
-        print("[STRIDE-DIAG] Gradient hooks registered. Will log non-contiguous gradients after each backward pass.")
+        print("[STRIDE-DIAG] Gradient hooks registered.")
+        print("[STRIDE-DIAG] Will automatically fix non-contiguous gradients to avoid DDP bucket view mismatch.")
 
     # Check initial parameter memory layout
     if rank == 0:
