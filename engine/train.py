@@ -465,6 +465,12 @@ def train_mudiff(rank, gpu, args):
     args.num_channels = 1
     att_conv = conv2d(64 * 8, 1, 1, padding=0).to(device)
 
+    # Log attention conv layer properties
+    if rank == 0:
+        print(f"[STRIDE-DIAG] att_conv layer created:")
+        print(f"  weight shape: {tuple(att_conv.weight.shape)}, stride: {tuple(att_conv.weight.stride())}")
+        print(f"  weight is_contiguous: {att_conv.weight.is_contiguous()}")
+
     disc_diffusive_2 = Discriminator_large(nc=2, ngf=args.ngf,
                                            t_emb_dim=args.t_emb_dim,
                                            act=nn.LeakyReLU(0.2)).to(device)
@@ -507,6 +513,51 @@ def train_mudiff(rank, gpu, args):
     gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, **ddp_kwargs)
     gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, **ddp_kwargs)
     disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, **ddp_kwargs)
+
+    # ============ DIAGNOSTIC LOGGING FOR STRIDE MISMATCH ============
+    # Add gradient hooks to detect non-contiguous gradients
+    def check_grad_stride(name, param):
+        """Hook to check gradient strides after backward pass"""
+        def hook(grad):
+            if grad is not None:
+                is_contig = grad.is_contiguous()
+                if not is_contig:
+                    print(f"[STRIDE-DIAG][rank {rank}] NON-CONTIGUOUS gradient in {name}:")
+                    print(f"  shape={tuple(grad.shape)}, stride={tuple(grad.stride())}")
+                    print(f"  expected_stride={tuple(grad.contiguous().stride())}")
+                    print(f"  dtype={grad.dtype}, device={grad.device}")
+            return grad
+        return hook
+
+    # Register hooks on all parameters
+    if rank == 0:
+        print("[STRIDE-DIAG] Registering gradient stride checking hooks...")
+    for model, model_name in [(gen_diffusive_1, "gen_diffusive_1"),
+                               (gen_diffusive_2, "gen_diffusive_2"),
+                               (disc_diffusive_2, "disc_diffusive_2")]:
+        for param_name, param in model.named_parameters():
+            if param.requires_grad:
+                param.register_hook(check_grad_stride(f"{model_name}.{param_name}", param))
+
+    if rank == 0:
+        print("[STRIDE-DIAG] Gradient hooks registered. Will log non-contiguous gradients after each backward pass.")
+
+    # Check initial parameter memory layout
+    if rank == 0:
+        print("\n[STRIDE-DIAG] Checking initial parameter memory layout:")
+        for model, model_name in [(gen_diffusive_1, "gen_diffusive_1"),
+                                   (gen_diffusive_2, "gen_diffusive_2"),
+                                   (disc_diffusive_2, "disc_diffusive_2")]:
+            non_contig_params = []
+            for param_name, param in model.named_parameters():
+                if not param.is_contiguous():
+                    non_contig_params.append(param_name)
+                    print(f"  [WARNING] {model_name}.{param_name} is NON-CONTIGUOUS at init:")
+                    print(f"    shape={tuple(param.shape)}, stride={tuple(param.stride())}")
+            if not non_contig_params:
+                print(f"  {model_name}: All parameters are contiguous ✓")
+        print()
+    # ============ END DIAGNOSTIC LOGGING ============
 
     # One-time model parameter summary
     if rank == 0:
@@ -617,6 +668,19 @@ def train_mudiff(rank, gpu, args):
     def run_g2(x, c1, c2, c3, t, z, prev):
         return gen_diffusive_2(x, c1, c2, c3, t, z, prev)
 
+    # ============================================================================
+    # DIAGNOSTIC LOGGING SUMMARY:
+    # This training loop includes extensive stride mismatch diagnostics:
+    # 1. Gradient hooks on all parameters to detect non-contiguous gradients
+    # 2. Initial parameter memory layout checks
+    # 3. Per-iteration logging (iteration 0 only) of:
+    #    - Input tensor memory formats (channels_last)
+    #    - Backward pass timing and gradient checks
+    #    - Specific non-contiguous gradient detection in D and G steps
+    # 4. Attention conv layer property logging
+    # All diagnostic logs are prefixed with [STRIDE-DIAG]
+    # ============================================================================
+
     for epoch in range(init_epoch, args.num_epoch):
         epoch_start_time = time.time()
         train_sampler.set_epoch(epoch)
@@ -652,6 +716,11 @@ def train_mudiff(rank, gpu, args):
             cond_data2 = x2.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             cond_data3 = x3.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             real_data = x4.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] Input tensor memory format (D step):")
+                print(f"  cond_data1: is_channels_last={cond_data1.is_contiguous(memory_format=torch.channels_last)}")
+                print(f"  real_data: is_channels_last={real_data.is_contiguous(memory_format=torch.channels_last)}")
             # log_cuda('after data load (D step)')
 
             t2 = torch.randint(0, args.num_timesteps, (real_data.size(0),), device=device)
@@ -727,9 +796,26 @@ def train_mudiff(rank, gpu, args):
                 dbg("grad2_real", grad2_real); print(f"[rank {rank}] d_total={float(d_total.detach())}", flush=True)
 
 
+            if rank == 0 and iteration == 0:
+                print(f"\n[STRIDE-DIAG][iter {iteration}] Before D backward pass:")
+                print(f"  d_total: shape={tuple(d_total.shape)}, requires_grad={d_total.requires_grad}")
+
             scaler_d.scale(d_total).backward()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After D backward pass - checking discriminator gradients")
+                # Check a few parameters specifically
+                for name, param in disc_diffusive_2.named_parameters():
+                    if param.grad is not None and not param.grad.is_contiguous():
+                        print(f"  [FOUND] {name}: grad is non-contiguous")
+                        print(f"    grad shape={tuple(param.grad.shape)}, stride={tuple(param.grad.stride())}")
+                        break  # Just show first one
+
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After D optimizer step")
 
             # ---- G step ----
             # Disable D grads, enable G grads
@@ -838,10 +924,28 @@ def train_mudiff(rank, gpu, args):
                 _dbg2("out1_G", x2_pos_sample_g1)
                 _dbg2("out2_G0", x2_pos_sample_g2)
                 _dbg2("g_total", errG)
+            if rank == 0 and iteration == 0:
+                print(f"\n[STRIDE-DIAG][iter {iteration}] Before G backward pass:")
+                print(f"  errG: shape={tuple(errG.shape)}, requires_grad={errG.requires_grad}")
+
             scaler_g.scale(errG).backward()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After G backward pass - checking generator gradients")
+                # Check generators
+                for model, model_name in [(gen_diffusive_1, "gen1"), (gen_diffusive_2, "gen2")]:
+                    for name, param in model.named_parameters():
+                        if param.grad is not None and not param.grad.is_contiguous():
+                            print(f"  [FOUND] {model_name}.{name}: grad is non-contiguous")
+                            print(f"    grad shape={tuple(param.grad.shape)}, stride={tuple(param.grad.stride())}")
+                            break  # Just show first one per model
+
             scaler_g.step(optimizer_gen_diffusive_1)
             scaler_g.step(optimizer_gen_diffusive_2)
             scaler_g.update()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After G optimizer step")
 
             global_step += 1
             # accumulate epoch metrics
