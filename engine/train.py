@@ -604,6 +604,31 @@ def train_mudiff(rank, gpu, args):
             if rank == 0:
                 print('[PRETRAIN] Pretrained initialization done.')
 
+    # Print hyperparameters summary
+    if rank == 0:
+        print("\n" + "="*70)
+        print("HYPERPARAMETERS SUMMARY")
+        print("="*70)
+        print(f"Learning Rates:")
+        print(f"  Generator:      {args.lr_g:.2e}")
+        print(f"  Discriminator:  {args.lr_d:.2e}")
+        print(f"Loss Weights:")
+        print(f"  L1 loss weight (lambda_l1_loss):   {args.lambda_l1_loss}")
+        print(f"  Mask loss weight (lambda_mask):    {args.lambda_mask_loss}")
+        print(f"  Adversarial weight (lambda_adv):   {args.lambda_adv}")
+        print(f"Training Settings:")
+        print(f"  Batch size:     {batch_size} (per GPU) x {args.world_size} (GPUs) = {batch_size * args.world_size} (total)")
+        print(f"  Epochs:         {args.num_epoch}")
+        print(f"  Timesteps:      {args.num_timesteps}")
+        print(f"  Use tanh:       {not args.not_use_tanh}")
+        print(f"  Use EMA:        {args.use_ema}")
+        print(f"  LR decay:       {not args.no_lr_decay}")
+        print(f"Data Settings:")
+        print(f"  Input path:     {args.input_path}")
+        print(f"  Target:         {args.target_modality}")
+        print(f"  Expected range: [-1.0, 1.0] (after dataset normalization)")
+        print("="*70 + "\n", flush=True)
+
     # Helpers for optional checkpointing of generator forwards
     def run_g1(x, c1, c2, c3, t, z):
         return gen_diffusive_1(x, c1, c2, c3, t, z)
@@ -647,6 +672,26 @@ def train_mudiff(rank, gpu, args):
             cond_data3 = x3.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             real_data = x4.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             # log_cuda('after data load (D step)')
+
+            # Debug: Print data ranges on first iteration of first epoch
+            if rank == 0 and epoch == 0 and iteration == 0:
+                print(f"\n[DATA-RANGE-DEBUG] Epoch {epoch}, Iteration {iteration}:")
+                print(f"  cond_data1: min={cond_data1.min():.4f}, max={cond_data1.max():.4f}, mean={cond_data1.mean():.4f}, std={cond_data1.std():.4f}")
+                print(f"  cond_data2: min={cond_data2.min():.4f}, max={cond_data2.max():.4f}, mean={cond_data2.mean():.4f}, std={cond_data2.std():.4f}")
+                print(f"  cond_data3: min={cond_data3.min():.4f}, max={cond_data3.max():.4f}, mean={cond_data3.mean():.4f}, std={cond_data3.std():.4f}")
+                print(f"  real_data:  min={real_data.min():.4f}, max={real_data.max():.4f}, mean={real_data.mean():.4f}, std={real_data.std():.4f}")
+                print(f"  Expected range: [-1.0, 1.0]")
+
+                # Sanity check: warn if data is significantly out of range
+                all_data = torch.cat([cond_data1, cond_data2, cond_data3, real_data], dim=1)
+                if all_data.min() < -1.5 or all_data.max() > 1.5:
+                    print(f"  ⚠ WARNING: Data appears to be outside expected [-1, 1] range!")
+                    print(f"  ⚠ Check dataset normalization in dataset_brats.py")
+                elif all_data.min() < -1.1 or all_data.max() > 1.1:
+                    print(f"  ⚠ WARNING: Some data slightly outside [-1, 1] range (may be clipping artifacts)")
+                else:
+                    print(f"  ✓ Data range looks correct!")
+                print(flush=True)
 
             t2 = torch.randint(0, args.num_timesteps, (real_data.size(0),), device=device)
 
@@ -816,6 +861,16 @@ def train_mudiff(rank, gpu, args):
                 errG2_2_L1 = F.l1_loss(x2_0_predict_diff_g2[:, [0], :], real_data)
                 errG_L1 = errG1_2_L1 + errG2_2_L1
 
+                # Debug: Print model output ranges and losses on first few iterations
+                if rank == 0 and epoch == 0 and iteration < 3:
+                    print(f"\n[MODEL-OUTPUT-DEBUG] Epoch {epoch}, Iteration {iteration}:")
+                    print(f"  x2_0_predict_g1: min={x2_0_predict_diff_g1.min():.4f}, max={x2_0_predict_diff_g1.max():.4f}, mean={x2_0_predict_diff_g1.mean():.4f}")
+                    print(f"  x2_0_predict_g2: min={x2_0_predict_diff_g2.min():.4f}, max={x2_0_predict_diff_g2.max():.4f}, mean={x2_0_predict_diff_g2.mean():.4f}")
+                    print(f"  real_data:       min={real_data.min():.4f}, max={real_data.max():.4f}, mean={real_data.mean():.4f}")
+                    print(f"  L1_loss_g1: {errG1_2_L1.item():.4f}, L1_loss_g2: {errG2_2_L1.item():.4f}, L1_total: {errG_L1.item():.4f}")
+                    print(f"  G_adv: {errG_adv.item():.4f}, mask_loss: {mask_loss.item():.4f}")
+                    print(f"  Total G loss: {(errG_adv + (args.lambda_l1_loss * errG_L1) + (args.lambda_mask_loss * mask_loss)).item():.4f}\n", flush=True)
+
                 errG = errG_adv + (args.lambda_l1_loss * errG_L1) + (args.lambda_mask_loss * mask_loss)
 
             # Debug prints before G backward (rank 0 only)
@@ -953,22 +1008,34 @@ def train_mudiff(rank, gpu, args):
                                                 cond_data3_val,
                                                 args.num_timesteps, x_t, T, args)
 
-            # diffusion steps
-            fake_sample_val = to_range_0_1(fake_sample_val); fake_sample_val = fake_sample_val / fake_sample_val.mean()
-            real_data_val = to_range_0_1(real_data_val); real_data_val = real_data_val / real_data_val.mean()
+            # Convert to [0, 1] range (model outputs are in [-1, 1])
+            fake_sample_val = to_range_0_1(fake_sample_val)
+            real_data_val = to_range_0_1(real_data_val)
 
+            # Convert to numpy
             fake_sample_val = fake_sample_val.cpu().numpy()
             real_data_val = real_data_val.cpu().numpy()
-            
+
             epoch_slot = epoch - init_epoch
 
+            # Calculate validation metrics with correct normalization
             val_l1_loss[0, epoch_slot, iteration] = abs(fake_sample_val - real_data_val).mean()
-            eps = 1e-8
-            fake = to_range_0_1(fake_sample_val); fake = fake / (fake.mean() + eps)
-            real = to_range_0_1(real_data_val);    real = real / (real.mean() + eps)
-            val_psnr_values[0, epoch_slot, iteration] = psnr(real, fake, data_range=max(real.max(), eps))
+            # PSNR expects data in [0, 1] range with data_range=1.0
+            psnr_value = psnr(real_data_val, fake_sample_val, data_range=1.0)
+            val_psnr_values[0, epoch_slot, iteration] = psnr_value
+
+            # Debug: Print validation metrics on first iteration
+            if rank == 0 and iteration == 0:
+                print(f"\n[VAL-DEBUG] Epoch {epoch}, Iteration {iteration}:")
+                print(f"  fake_sample: min={fake_sample_val.min():.4f}, max={fake_sample_val.max():.4f}, mean={fake_sample_val.mean():.4f}")
+                print(f"  real_data:   min={real_data_val.min():.4f}, max={real_data_val.max():.4f}, mean={real_data_val.mean():.4f}")
+                print(f"  Val L1 loss: {val_l1_loss[0, epoch_slot, iteration]:.6f}")
+                print(f"  Val PSNR:    {psnr_value:.4f} dB")
+                print(f"  Expected: PSNR > 0, data in [0, 1]\n", flush=True)
         
         mean_psnr = float(np.nanmean(val_psnr_values[0, epoch_slot, :]))
+        mean_val_l1 = float(np.nanmean(val_l1_loss[0, epoch_slot, :]))
+
         if rank == 0:
             log_step(
                 scope='val', epoch=epoch, iteration=0, global_step=global_step,
@@ -976,7 +1043,32 @@ def train_mudiff(rank, gpu, args):
                 batch_size=batch_size, world_size=args.world_size,
             )
             log_epoch_summary(epoch, global_step, epoch_avg_losses={'train_G': avg_losses.get('G_total', 0.0), 'train_D': avg_losses.get('D_total', 0.0)},
-                              val_metrics={'val_psnr': mean_psnr, 'val_l1': float(np.nanmean(val_l1_loss[0, epoch_slot, :]))})
+                              val_metrics={'val_psnr': mean_psnr, 'val_l1': mean_val_l1})
+
+            # Enhanced epoch summary with trend tracking
+            print(f"\n{'='*70}")
+            print(f"EPOCH {epoch} COMPLETE (global_step={global_step})")
+            print(f"{'='*70}")
+            print(f"Training Losses (averaged over epoch):")
+            print(f"  G_total:  {avg_losses.get('G_total', 0.0):.4f}  (G_adv: {avg_losses.get('G_adv', 0.0):.4f}, G_L1: {avg_losses.get('G_L1', 0.0):.4f}, G_mask: {avg_losses.get('G_mask', 0.0):.4f})")
+            print(f"  D_total:  {avg_losses.get('D_total', 0.0):.4f}  (D_real: {avg_losses.get('D_real', 0.0):.4f}, D_fake: {avg_losses.get('D_fake', 0.0):.4f})")
+            print(f"Validation Metrics:")
+            print(f"  PSNR:     {mean_psnr:.4f} dB  {'✓ POSITIVE!' if mean_psnr > 0 else '✗ NEGATIVE (check data ranges!)'}")
+            print(f"  L1 loss:  {mean_val_l1:.6f}")
+
+            # Track improvement
+            if epoch > 0:
+                prev_epoch_slot = epoch_slot - 1
+                if prev_epoch_slot >= 0:
+                    prev_psnr = float(np.nanmean(val_psnr_values[0, prev_epoch_slot, :]))
+                    prev_l1 = float(np.nanmean(val_l1_loss[0, prev_epoch_slot, :]))
+                    psnr_change = mean_psnr - prev_psnr
+                    l1_change = mean_val_l1 - prev_l1
+                    print(f"Improvement from epoch {epoch-1}:")
+                    print(f"  PSNR change:  {psnr_change:+.4f} dB  {'✓' if psnr_change > 0 else '✗'}")
+                    print(f"  L1 change:    {l1_change:+.6f}     {'✓' if l1_change < 0 else '✗'}")
+
+            print(f"{'='*70}\n", flush=True)
             # Enhanced epoch report
             try:
                 epoch_time = time.time() - epoch_start_time

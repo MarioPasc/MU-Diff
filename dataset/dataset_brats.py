@@ -78,11 +78,17 @@ class BratsDataset(Dataset):
             img_tensor = torch.from_numpy(img.astype(np.float32))
             if img_tensor.dim() == 2:
                 img_tensor = img_tensor.unsqueeze(0)  # add channel dimension [1,H,W]
+            # Normalize from z-score to [-1, 1] range
+            # Clip z-score at ±3 sigma (covers ~99.7% of data), then scale to [-1, 1]
+            img_tensor = torch.clamp(img_tensor, -3.0, 3.0) / 3.0
             cond_imgs.append(img_tensor)
         cond_stack = torch.cat(cond_imgs, dim=0)  # shape [3, H, W] for 3 condition images
+
         target_mod = self.modality_order[-1]
         target_img = self._data[target_mod][idx]  # numpy array of shape (H, W)
         target_tensor = torch.from_numpy(target_img.astype(np.float32)).unsqueeze(0)  # [1,H,W]
+        # Normalize from z-score to [-1, 1] range
+        target_tensor = torch.clamp(target_tensor, -3.0, 3.0) / 3.0
         return cond_stack, target_tensor
 
 

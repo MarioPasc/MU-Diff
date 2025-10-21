@@ -267,6 +267,8 @@ def sample_and_test(args):
     torch.cuda.set_device(args.gpu_chose)
     device = torch.device('cuda:{}'.format(args.gpu_chose))
 
+    # Convert from model output range [-1, 1] to visualization range [0, 1]
+    # Dataset now normalizes z-score to [-1, 1], and model outputs via tanh to [-1, 1]
     to_range_0_1 = lambda x: (x + 1.) / 2.
 
     # loading dataset

@@ -1,0 +1,76 @@
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module fused...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module fused...
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module upfirdn2d...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module upfirdn2d...
+[W1017 13:16:16.147204112 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+[W1017 13:16:16.155687911 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module fused...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module fused...
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module upfirdn2d...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module fused...
+Detected CUDA files, patching ldflags
+Emitting ninja build file /mnt/home/users/tic_163_uma/mpascual/fscratch/repos/MU-Diff/.torch_extensions/build.ninja...
+Building extension module upfirdn2d...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+Loading extension module upfirdn2d...
+Loading extension module upfirdn2d...
+[rank1]:[W1017 13:27:45.850669358 reducer.cpp:327] Warning: Grad strides do not match bucket view strides. This may indicate grad was not created according to the gradient layout contract, or that the param's strides changed since DDP was constructed.  This is not an error, but may impair performance.
+grad.sizes() = [64, 1, 3, 3], strides() = [9, 1, 3, 1]
+bucket_view.sizes() = [64, 1, 3, 3], strides() = [9, 9, 3, 1] (function operator())
+[rank0]:[W1017 13:27:45.867476967 reducer.cpp:327] Warning: Grad strides do not match bucket view strides. This may indicate grad was not created according to the gradient layout contract, or that the param's strides changed since DDP was constructed.  This is not an error, but may impair performance.
+grad.sizes() = [64, 1, 3, 3], strides() = [9, 1, 3, 1]
+bucket_view.sizes() = [64, 1, 3, 3], strides() = [9, 9, 3, 1] (function operator())
+/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.8/site-packages/torch/optim/lr_scheduler.py:216: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.8/site-packages/torch/optim/lr_scheduler.py:216: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 116, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 125, in _main
+    prepare(preparation_data)
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 236, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 287, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/runpy.py", line 288, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/runpy.py", line 97, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/mnt2/fscratch/users/tic_163_uma/mpascual/repos/MU-Diff/engine/train.py", line 1, in <module>
+    import argparse
+ModuleNotFoundError: No module named 'argparse'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 116, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 125, in _main
+    prepare(preparation_data)
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 236, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/multiprocessing/spawn.py", line 287, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/runpy.py", line 288, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/runpy.py", line 97, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/mnt/home/users/tic_163_uma/mpascual/fscratch/conda_envs/mudiff/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/mnt2/fscratch/users/tic_163_uma/mpascual/repos/MU-Diff/engine/train.py", line 1, in <module>
+    import argparse
+ModuleNotFoundError: No module named 'argparse'
