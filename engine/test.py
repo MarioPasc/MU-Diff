@@ -202,7 +202,8 @@ def sample_from_model(coefficients, generator1, cond1, generator2, cond2, cond3,
 def load_checkpoint(checkpoint_dir, netG, name_of_network, device='cuda:0'):
     checkpoint_file = checkpoint_dir.format(name_of_network)
 
-    checkpoint = torch.load(checkpoint_file, map_location=device)
+    # weights_only=True for loading state_dicts (secure, only tensors)
+    checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=True)
     ckpt = checkpoint
 
     for key in list(ckpt.keys()):

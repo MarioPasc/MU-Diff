@@ -13,8 +13,9 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # 
 # Default: 30 minutes (1800 seconds) to handle long operations on supercomputing clusters
 # Can be overridden via environment variable: export NCCL_TIMEOUT_MINUTES=60
 nccl_timeout_minutes = int(os.environ.get("NCCL_TIMEOUT_MINUTES", "30"))
-os.environ.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")  # Enable async error handling for better debugging
-os.environ.setdefault("NCCL_BLOCKING_WAIT", "1")  # Use blocking wait to catch errors immediately
+# Updated to use TORCH_NCCL_* prefix (NCCL_* is deprecated as of PyTorch 1.13+)
+os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")  # Enable async error handling for better debugging
+os.environ.setdefault("TORCH_NCCL_BLOCKING_WAIT", "1")  # Use blocking wait to catch errors immediately
 
 # Set NCCL timeout for PyTorch distributed operations
 import datetime
@@ -455,15 +456,44 @@ def train_mudiff(rank, gpu, args):
     critic_criterian = nn.BCEWithLogitsLoss(reduction='none')
 
     # networks performing reverse denoising
-    gen_diffusive_1 = NCSNpp(args).to(device, memory_format=torch.channels_last)
-    gen_diffusive_2 = NCSNpp_adaptive(args).to(device, memory_format=torch.channels_last)
+    # NOTE: channels_last memory format should only be applied to activation tensors (data),
+    # not to model parameters, as it can cause gradient stride mismatches with DDP.
+    # Data tensors are converted to channels_last format where needed (see lines 645-648, 737-740, etc.)
+    gen_diffusive_1 = NCSNpp(args).to(device)
+    gen_diffusive_2 = NCSNpp_adaptive(args).to(device)
 
     args.num_channels = 1
-    att_conv = conv2d(64 * 8, 1, 1, padding=0).to(device, memory_format=torch.channels_last)
+    att_conv = conv2d(64 * 8, 1, 1, padding=0).to(device)
+
+    # Log attention conv layer properties
+    if rank == 0:
+        print(f"[STRIDE-DIAG] att_conv layer created:")
+        print(f"  weight shape: {tuple(att_conv.weight.shape)}, stride: {tuple(att_conv.weight.stride())}")
+        print(f"  weight is_contiguous: {att_conv.weight.is_contiguous()}")
 
     disc_diffusive_2 = Discriminator_large(nc=2, ngf=args.ngf,
                                            t_emb_dim=args.t_emb_dim,
-                                           act=nn.LeakyReLU(0.2)).to(device, memory_format=torch.channels_last)
+                                           act=nn.LeakyReLU(0.2)).to(device)
+
+    # ============ STRIDE FIX: Ensure contiguous parameters before DDP wrapping ============
+    def ensure_contiguous_params(model, model_name, rank):
+        """Ensure all model parameters are contiguous before DDP wrapping"""
+        if rank == 0:
+            print(f"[STRIDE-FIX] Ensuring contiguous parameters for {model_name}")
+        for name, param in model.named_parameters():
+            if not param.is_contiguous():
+                if rank == 0:
+                    print(f"  [STRIDE-FIX] Making {name} contiguous: shape={tuple(param.shape)}")
+                # Replace non-contiguous parameter with contiguous copy
+                param.data = param.data.contiguous()
+
+        # Verify all parameters are contiguous
+        non_contig = [n for n, p in model.named_parameters() if not p.is_contiguous()]
+        if rank == 0:
+            if not non_contig:
+                print(f"  [STRIDE-FIX] ✓ All {model_name} parameters are contiguous")
+            else:
+                print(f"  [WARNING] Still non-contiguous: {non_contig[:5]}")
 
     # Note: broadcast_params removed - DDP automatically synchronizes parameters during initialization
     # This avoids redundant communication and potential synchronization issues
@@ -500,9 +530,71 @@ def train_mudiff(rank, gpu, args):
         gradient_as_bucket_view=True,      # grads como vistas → menos copias
         static_graph=True                  # grafo estable → menos metadatos
     )
+
+    # Apply stride fix before DDP wrapping
+    ensure_contiguous_params(gen_diffusive_1, "gen_diffusive_1", rank)
+    ensure_contiguous_params(gen_diffusive_2, "gen_diffusive_2", rank)
+    ensure_contiguous_params(disc_diffusive_2, "disc_diffusive_2", rank)
+
+    # NOW wrap with DDP
     gen_diffusive_1 = nn.parallel.DistributedDataParallel(gen_diffusive_1, **ddp_kwargs)
     gen_diffusive_2 = nn.parallel.DistributedDataParallel(gen_diffusive_2, **ddp_kwargs)
     disc_diffusive_2 = nn.parallel.DistributedDataParallel(disc_diffusive_2, **ddp_kwargs)
+
+    # ============ DIAGNOSTIC LOGGING FOR STRIDE MISMATCH ============
+    # Add gradient hooks to detect AND FIX non-contiguous gradients
+    # This is necessary because channels_last input format can create gradients
+    # with non-standard strides that conflict with DDP's gradient_as_bucket_view=True
+    def check_grad_stride(name, param):
+        """Hook to check gradient strides after backward pass and make them contiguous if needed"""
+        def hook(grad):
+            if grad is not None:
+                is_contig = grad.is_contiguous()
+                if not is_contig:
+                    print(f"[STRIDE-DIAG][rank {rank}] NON-CONTIGUOUS gradient in {name}:")
+                    print(f"  shape={tuple(grad.shape)}, stride={tuple(grad.stride())}")
+                    print(f"  expected_stride={tuple(grad.contiguous().stride())}")
+                    print(f"  dtype={grad.dtype}, device={grad.device}")
+                    print(f"  FIX: Making gradient contiguous to avoid DDP bucket view mismatch")
+                    # Return contiguous gradient to fix stride mismatch
+                    return grad.contiguous()
+            return grad
+        return hook
+
+    # Register hooks on all parameters - now with parameter shape logging
+    if rank == 0:
+        print("[STRIDE-DIAG] Registering gradient stride checking hooks...")
+    for model, model_name in [(gen_diffusive_1, "gen_diffusive_1"),
+                               (gen_diffusive_2, "gen_diffusive_2"),
+                               (disc_diffusive_2, "disc_diffusive_2")]:
+        for param_name, param in model.named_parameters():
+            if param.requires_grad:
+                # Log parameter shapes to identify the [64, 1, 3, 3] weight
+                if rank == 0 and tuple(param.shape) == (64, 1, 3, 3):
+                    print(f"[STRIDE-DIAG] Found [64, 1, 3, 3] parameter: {model_name}.{param_name}")
+                    print(f"  Initial stride: {tuple(param.stride())}, is_contiguous: {param.is_contiguous()}")
+                param.register_hook(check_grad_stride(f"{model_name}.{param_name}", param))
+
+    if rank == 0:
+        print("[STRIDE-DIAG] Gradient hooks registered.")
+        print("[STRIDE-DIAG] Will automatically fix non-contiguous gradients to avoid DDP bucket view mismatch.")
+
+    # Check initial parameter memory layout
+    if rank == 0:
+        print("\n[STRIDE-DIAG] Checking initial parameter memory layout:")
+        for model, model_name in [(gen_diffusive_1, "gen_diffusive_1"),
+                                   (gen_diffusive_2, "gen_diffusive_2"),
+                                   (disc_diffusive_2, "disc_diffusive_2")]:
+            non_contig_params = []
+            for param_name, param in model.named_parameters():
+                if not param.is_contiguous():
+                    non_contig_params.append(param_name)
+                    print(f"  [WARNING] {model_name}.{param_name} is NON-CONTIGUOUS at init:")
+                    print(f"    shape={tuple(param.shape)}, stride={tuple(param.stride())}")
+            if not non_contig_params:
+                print(f"  {model_name}: All parameters are contiguous ✓")
+        print()
+    # ============ END DIAGNOSTIC LOGGING ============
 
     # One-time model parameter summary
     if rank == 0:
@@ -553,7 +645,8 @@ def train_mudiff(rank, gpu, args):
 
     if args.resume:
         checkpoint_file = os.path.join(exp_path, 'content.pth')
-        checkpoint = torch.load(checkpoint_file, map_location=device)
+        # weights_only=False required for loading full checkpoints with optimizer/scheduler states
+        checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False)
         init_epoch = checkpoint['epoch']
         epoch = init_epoch
         gen_diffusive_1.load_state_dict(checkpoint['gen_diffusive_1_dict'])
@@ -587,7 +680,8 @@ def train_mudiff(rank, gpu, args):
                         print(f"[PRETRAIN] File not found: {path}")
                     return
                 try:
-                    result = model_ddp.load_state_dict(torch.load(path, map_location=device), strict=False)
+                    # weights_only=True for loading state_dicts (secure, only tensors)
+                    result = model_ddp.load_state_dict(torch.load(path, map_location=device, weights_only=True), strict=False)
                     missing = getattr(result, 'missing_keys', None) or (result[0] if isinstance(result, (list, tuple)) else [])
                     unexpected = getattr(result, 'unexpected_keys', None) or (result[1] if isinstance(result, (list, tuple)) else [])
                     if rank == 0:
@@ -636,6 +730,19 @@ def train_mudiff(rank, gpu, args):
     def run_g2(x, c1, c2, c3, t, z, prev):
         return gen_diffusive_2(x, c1, c2, c3, t, z, prev)
 
+    # ============================================================================
+    # DIAGNOSTIC LOGGING SUMMARY:
+    # This training loop includes extensive stride mismatch diagnostics:
+    # 1. Gradient hooks on all parameters to detect non-contiguous gradients
+    # 2. Initial parameter memory layout checks
+    # 3. Per-iteration logging (iteration 0 only) of:
+    #    - Input tensor memory formats (channels_last)
+    #    - Backward pass timing and gradient checks
+    #    - Specific non-contiguous gradient detection in D and G steps
+    # 4. Attention conv layer property logging
+    # All diagnostic logs are prefixed with [STRIDE-DIAG]
+    # ============================================================================
+
     for epoch in range(init_epoch, args.num_epoch):
         epoch_start_time = time.time()
         train_sampler.set_epoch(epoch)
@@ -671,6 +778,11 @@ def train_mudiff(rank, gpu, args):
             cond_data2 = x2.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             cond_data3 = x3.to(device, non_blocking=True).to(memory_format=torch.channels_last)
             real_data = x4.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] Input tensor memory format (D step):")
+                print(f"  cond_data1: is_channels_last={cond_data1.is_contiguous(memory_format=torch.channels_last)}")
+                print(f"  real_data: is_channels_last={real_data.is_contiguous(memory_format=torch.channels_last)}")
             # log_cuda('after data load (D step)')
 
             # Debug: Print data ranges on first iteration of first epoch
@@ -711,8 +823,11 @@ def train_mudiff(rank, gpu, args):
                 with autocast('cuda', enabled=False):
                     D2_real_r1, _ = disc_diffusive_2(x2_t, t2, x2_tp1.detach())
                     # build graph for penalty so it contributes gradients to D (R1 needs create_graph=True)
+                    # IMPORTANT: retain_graph=True is required here because grad_penalty2 will be part of d_total,
+                    # and when we call backward() on d_total, PyTorch needs the computation graph for D2_real_r1
+                    # to still exist in order to compute second-order gradients through grad2_real
                     grad2_real = torch.autograd.grad(
-                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True, retain_graph=RETAIN_GRAPH
+                        outputs=D2_real_r1.sum(), inputs=x2_t, create_graph=True, retain_graph=True
                     )[0]
                     grad2_penalty = (grad2_real.view(grad2_real.size(0), -1).norm(2, dim=1) ** 2).mean()
                     grad_penalty2 = (args.r1_gamma / 2) * grad2_penalty
@@ -763,9 +878,26 @@ def train_mudiff(rank, gpu, args):
                 dbg("grad2_real", grad2_real); print(f"[rank {rank}] d_total={float(d_total.detach())}", flush=True)
 
 
+            if rank == 0 and iteration == 0:
+                print(f"\n[STRIDE-DIAG][iter {iteration}] Before D backward pass:")
+                print(f"  d_total: shape={tuple(d_total.shape)}, requires_grad={d_total.requires_grad}")
+
             scaler_d.scale(d_total).backward()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After D backward pass - checking discriminator gradients")
+                # Check a few parameters specifically
+                for name, param in disc_diffusive_2.named_parameters():
+                    if param.grad is not None and not param.grad.is_contiguous():
+                        print(f"  [FOUND] {name}: grad is non-contiguous")
+                        print(f"    grad shape={tuple(param.grad.shape)}, stride={tuple(param.grad.stride())}")
+                        break  # Just show first one
+
             scaler_d.step(optimizer_disc_diffusive_2)
             scaler_d.update()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After D optimizer step")
 
             # ---- G step ----
             # Disable D grads, enable G grads
@@ -884,10 +1016,28 @@ def train_mudiff(rank, gpu, args):
                 _dbg2("out1_G", x2_pos_sample_g1)
                 _dbg2("out2_G0", x2_pos_sample_g2)
                 _dbg2("g_total", errG)
+            if rank == 0 and iteration == 0:
+                print(f"\n[STRIDE-DIAG][iter {iteration}] Before G backward pass:")
+                print(f"  errG: shape={tuple(errG.shape)}, requires_grad={errG.requires_grad}")
+
             scaler_g.scale(errG).backward()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After G backward pass - checking generator gradients")
+                # Check generators
+                for model, model_name in [(gen_diffusive_1, "gen1"), (gen_diffusive_2, "gen2")]:
+                    for name, param in model.named_parameters():
+                        if param.grad is not None and not param.grad.is_contiguous():
+                            print(f"  [FOUND] {model_name}.{name}: grad is non-contiguous")
+                            print(f"    grad shape={tuple(param.grad.shape)}, stride={tuple(param.grad.stride())}")
+                            break  # Just show first one per model
+
             scaler_g.step(optimizer_gen_diffusive_1)
             scaler_g.step(optimizer_gen_diffusive_2)
             scaler_g.update()
+
+            if rank == 0 and iteration == 0:
+                print(f"[STRIDE-DIAG][iter {iteration}] After G optimizer step")
 
             global_step += 1
             # accumulate epoch metrics
